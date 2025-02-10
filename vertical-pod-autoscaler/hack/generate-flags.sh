@@ -26,12 +26,12 @@ COMPONENTS=("admission-controller" "recommender" "updater")
 extract_flags() {
     local binary=$1
     local component=$2
-    
+
     if [ ! -f "$binary" ]; then
         echo "Error: Binary not found for ${component} at ${binary}"
         return 1
     fi
-    
+
     echo "# What are the parameters to VPA ${component}?"
     echo "This document is auto-generated from the flag definitions in the VPA ${component} code."
     echo "Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
@@ -40,16 +40,21 @@ extract_flags() {
     echo "|------|---------|-------------|"
 
     $binary --help 2>&1 | grep -E '^\s*-' | while read -r line; do
-        flag=$(echo "$line" | awk '{print $1}' | sed 's/^-*//;s/=.*$//')
+        flags=$(echo "$line" | awk '{print $1, $2}' | grep -oP '(?<=-)([^ ]+(?:, --[^ ]+)?)')
         default=$(echo "$line" | sed -n 's/.*default \([^)]*\).*/\1/p')
-        description=$(echo "$line" | sed -E 's/^\s*-[^[:space:]]+ [^[:space:]]+ //;s/ \(default.*\)//')
-        description=$(echo "$description" | sed -E "s/^--?${flag}[[:space:]]?//")
-        
-	echo "| \`--${flag}\` | ${default} | ${description} |"
+        description=$(echo "$line" | sed -E 's/^\s*-[^[:space:]]+ ([^[:space:]]+ )?//;s/ \(default.*\)//')
+
+        # Handle flags with multiple names
+        if [[ $flags == *","* ]]; then
+            flag1=$(echo "$flags" | cut -d',' -f1)
+            flag2=$(echo "$flags" | cut -d',' -f2 | sed 's/^ --//')
+            echo "| \`-${flag1}, --${flag2}\` | ${default} | ${description} |"
+        else
+            echo "| \`--${flags}\` | ${default} | ${description} |"
+        fi
     done
     echo
 }
-
 # Build components
 pushd "${SCRIPT_ROOT}" >/dev/null
 for component in "${COMPONENTS[@]}"; do
