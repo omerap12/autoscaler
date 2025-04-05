@@ -117,7 +117,7 @@ type Vpa struct {
 
 // NewVpa returns a new Vpa with a given ID and pod selector. Doesn't set the
 // links to the matched aggregations.
-func NewVpa(id VpaID, selector labels.Selector, created time.Time ) *Vpa {
+func NewVpa(id VpaID, selector labels.Selector, created time.Time) *Vpa {
 	vpa := &Vpa{
 		ID:                              id,
 		PodSelector:                     selector,
@@ -131,8 +131,8 @@ func NewVpa(id VpaID, selector labels.Selector, created time.Time ) *Vpa {
 		// client conversion, this needs to be done based on the resource content.
 		// The K8s client will not return the resource apiVersion as it's converted
 		// to the version requested by the client server side.
-		APIVersion: vpa_types.SchemeGroupVersion.Version,
-		PodCount:   0,
+		APIVersion:        vpa_types.SchemeGroupVersion.Version,
+		PodCount:          0,
 		RecommenderConfig: nil,
 	}
 	return vpa
@@ -299,5 +299,5 @@ func (vpa *Vpa) HasMatchedPods() bool {
 
 // SetRecommenderConfig updates the recommender configuration for the VPA.
 func (vpa *Vpa) SetRecommenderConfig(config *vpa_types.RecommenderConfig) {
-    vpa.RecommenderConfig = config
+	vpa.RecommenderConfig = config
 }

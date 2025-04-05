@@ -526,7 +526,12 @@ Loop:
 			klog.V(3).InfoS("OOM detected", "oomInfo", oomInfo)
 			pod := feeder.clusterState.Pods()[oomInfo.ContainerID.PodID]
 			controlledVpa := feeder.clusterState.GetControllingVPA(pod)
-			if err = feeder.clusterState.RecordOOM(oomInfo.ContainerID, oomInfo.Timestamp, oomInfo.Memory,controlledVpa.RecommenderConfig.OOMBumpUpRatio,controlledVpa.RecommenderConfig.OOMMinBumpUp); err != nil {
+			var oomBumpUpRatio, oomMinBumpUp *float64
+			if controlledVpa != nil && controlledVpa.RecommenderConfig != nil {
+				oomBumpUpRatio = controlledVpa.RecommenderConfig.OOMBumpUpRatio
+				oomMinBumpUp = controlledVpa.RecommenderConfig.OOMMinBumpUp
+			}
+			if err = feeder.clusterState.RecordOOM(oomInfo.ContainerID, oomInfo.Timestamp, oomInfo.Memory, oomBumpUpRatio, oomMinBumpUp); err != nil {
 				klog.V(0).InfoS("Failed to record OOM", "oomInfo", oomInfo, "error", err)
 			}
 		default:

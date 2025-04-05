@@ -182,6 +182,7 @@ func (container *ContainerState) addMemorySample(sample *ContainerUsageSample, i
 
 // RecordOOM adds info regarding OOM event in the model as an artificial memory sample.
 func (container *ContainerState) RecordOOM(timestamp time.Time, requestedMemory ResourceAmount, OOMBumpUpRatio *float64, OOMMinBumpUp *float64) error {
+	klog.V(4).InfoS("RecordOOM called", "timestamp", timestamp, "requestedMemory", requestedMemory, "OOMBumpUpRatio", OOMBumpUpRatio, "OOMMinBumpUp", OOMMinBumpUp)
 	config := GetAggregationsConfig()
 
 	// Discard old OOM
