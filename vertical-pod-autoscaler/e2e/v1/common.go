@@ -149,6 +149,13 @@ func GetHamsterPods(f *framework.Framework) (*apiv1.PodList, error) {
 	return f.ClientSet.CoreV1().Pods(f.Namespace.Name).List(context.TODO(), options)
 }
 
+// GetOOMPods returns running OOM test pods (matched by utils.OOMLabels)
+func GetOOMPods(f *framework.Framework) (*apiv1.PodList, error) {
+	label := labels.SelectorFromSet(labels.Set(utils.OOMLabels))
+	options := metav1.ListOptions{LabelSelector: label.String(), FieldSelector: getPodSelectorExcludingDonePodsOrDie()}
+	return f.ClientSet.CoreV1().Pods(f.Namespace.Name).List(context.TODO(), options)
+}
+
 // NewTestCronJob returns a CronJob for test purposes.
 func NewTestCronJob(name, schedule string, replicas int32) *batchv1.CronJob {
 	backoffLimit := utils.DefaultHamsterBackoffLimit
@@ -294,10 +301,10 @@ func WaitForPodsRestarted(f *framework.Framework, podList *apiv1.PodList) error 
 }
 
 // WaitForPodsEvicted waits until some pods from the list are evicted.
-func WaitForPodsEvicted(f *framework.Framework, podList *apiv1.PodList) error {
+func WaitForPodsEvicted(f *framework.Framework, podList *apiv1.PodList, timeout time.Duration) error {
 	initialPodSet := MakePodSet(podList)
 
-	return wait.PollUntilContextTimeout(context.Background(), utils.PollInterval, utils.PollTimeout, true, func(ctx context.Context) (done bool, err error) {
+	return wait.PollUntilContextTimeout(context.Background(), utils.PollInterval, timeout, true, func(ctx context.Context) (done bool, err error) {
 		currentPodList, err := GetHamsterPods(f)
 		if err != nil {
 			return false, err
@@ -305,6 +312,34 @@ func WaitForPodsEvicted(f *framework.Framework, podList *apiv1.PodList) error {
 		currentPodSet := MakePodSet(currentPodList)
 		return GetEvictedPodsCount(currentPodSet, initialPodSet) > 0, nil
 	})
+}
+
+// WaitForPodsEvictedWithResult waits for pods to be evicted and returns true if evicted within timeout, false otherwise.
+// TODO(omerap12): merge it with WaitForPodsRestarted function
+func WaitForPodsEvictedWithResult(f *framework.Framework, podList *apiv1.PodList, timeout time.Duration) (bool, error) {
+	initialPodSet := MakePodSet(podList)
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	err := wait.PollUntilContextTimeout(ctx, utils.PollInterval, timeout, true, func(ctx context.Context) (done bool, err error) {
+		currentPodList, err := GetHamsterPods(f)
+		if err != nil {
+			return false, err
+		}
+		currentPodSet := MakePodSet(currentPodList)
+		return GetEvictedPodsCount(currentPodSet, initialPodSet) > 0, nil
+	})
+
+	if err != nil {
+		// Check if it's a timeout error
+		if ctx.Err() == context.DeadlineExceeded || strings.Contains(err.Error(), "timed out") {
+			return false, nil // Timeout occurred, pods not evicted
+		}
+		return false, err // Other error occurred
+	}
+
+	return true, nil // Pods were evicted
 }
 
 // WerePodsSuccessfullyRestarted returns true if some pods from initialPodSet have been

@@ -203,7 +203,7 @@ var _ = ActuationSuiteE2eDescribe("Actuation", func() {
 		utils.InstallVPA(f, vpaCRD)
 
 		ginkgo.By("Waiting for pods to be evicted")
-		err = WaitForPodsEvicted(f, podList)
+		err = WaitForPodsEvicted(f, podList, utils.PollTimeout)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
@@ -276,7 +276,7 @@ var _ = ActuationSuiteE2eDescribe("Actuation", func() {
 		}, restriction.DeferredResizeUpdateTimeout, 10*time.Second).Should(gomega.Succeed())
 
 		ginkgo.By("Waiting for pods to be evicted")
-		err = WaitForPodsEvicted(f, podList)
+		err = WaitForPodsEvicted(f, podList, utils.PollTimeout)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
@@ -838,7 +838,7 @@ func testEvictsReplicatedPods(f *framework.Framework, controller *autoscaling.Cr
 	utils.InstallVPA(f, vpaCRD)
 
 	ginkgo.By("Waiting for pods to be evicted")
-	err = WaitForPodsEvicted(f, podList)
+	err = WaitForPodsEvicted(f, podList, utils.PollTimeout)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
@@ -898,7 +898,7 @@ func testEvictsSingletonPodWhenConfigured(f *framework.Framework, controller *au
 	utils.InstallVPA(f, vpaCRD)
 
 	ginkgo.By("Waiting for pods to be evicted")
-	err = WaitForPodsEvicted(f, podList)
+	err = WaitForPodsEvicted(f, podList, utils.PollTimeout)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 

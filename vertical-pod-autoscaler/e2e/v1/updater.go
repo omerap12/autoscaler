@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/e2e/utils"
 	vpa_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
+	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/updater/priority"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/status"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/test"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -65,7 +66,7 @@ var _ = UpdaterE2eDescribe("Updater", func() {
 		podList := setupPodsForUpscalingEviction(f)
 
 		ginkgo.By("Waiting for pods to be evicted")
-		err := WaitForPodsEvicted(f, podList)
+		err := WaitForPodsEvicted(f, podList, utils.PollTimeout)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
@@ -95,7 +96,7 @@ var _ = UpdaterE2eDescribe("Updater", func() {
 		podList := setupPodsForDownscalingEviction(f, nil)
 
 		ginkgo.By("Waiting for pods to be evicted")
-		err := WaitForPodsEvicted(f, podList)
+		err := WaitForPodsEvicted(f, podList, utils.PollTimeout)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
@@ -199,6 +200,85 @@ var _ = UpdaterE2eDescribe("Updater", func() {
 
 		ginkgo.By("Waiting for pods to be in-place downscaled")
 		err := WaitForPodsUpdatedWithoutEviction(f, initialPods)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+})
+
+var _ = UpdaterE2eDescribe("Updater with PerVPAConfig", ginkgo.Label("FG:PerVPAConfig"), func() {
+	const replicas = 3
+	const statusUpdateInterval = 10 * time.Second
+	const defaultOOMThreshold = priority.DefaultEvictAfterOOMThreshold
+	vpaThreshold := 10 * time.Second
+	
+	framework.Logf("Using VPA threshold: %v (default: %v)", vpaThreshold, priority.DefaultEvictAfterOOMThreshold)
+	f := framework.NewDefaultFramework("vertical-pod-autoscaling")
+	f.NamespacePodSecurityEnforceLevel = podsecurity.LevelBaseline
+
+	ginkgo.It("evicts pods with quick OOM based on evictAfterOOMThreshold", func() {
+		ginkgo.By("Setting up the Admission Controller status")
+		stopCh := make(chan struct{})
+		statusUpdater := status.NewUpdater(
+			f.ClientSet,
+			status.AdmissionControllerStatusName,
+			status.AdmissionControllerStatusNamespace,
+			statusUpdateInterval,
+			"e2e test",
+		)
+		defer func() {
+			ginkgo.By("Deleting the Admission Controller status")
+			close(stopCh)
+			err := f.ClientSet.CoordinationV1().Leases(status.AdmissionControllerStatusNamespace).
+				Delete(context.TODO(), status.AdmissionControllerStatusName, metav1.DeleteOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		}()
+		statusUpdater.Run(stopCh)
+
+		ginkgo.By("Setting up a deployment that will OOM quickly")
+		runOomingReplicationController(
+			f.ClientSet,
+			f.Namespace.Name,
+			"hamster",
+			replicas,
+		)
+
+		ginkgo.By("Waiting for pods to be created and OOM")
+		time.Sleep(10 * time.Second) // Give time for pods to OOM at least once
+
+		podList, err := GetOOMPods(f)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(len(podList.Items)).To(gomega.BeNumerically(">", 0))
+
+		ginkgo.By("Setting up a VPA CRD with evictAfterOOMThreshold=10s")
+		targetRef := &autoscaling.CrossVersionObjectReference{
+			APIVersion: "apps/v1",
+			Kind:       "Deployment",
+			Name:       "hamster",
+		}
+		containerName := utils.GetHamsterContainerNameByIndex(0)
+
+		vpaCRD := test.VerticalPodAutoscaler().
+			WithName("hamster-vpa").
+			WithNamespace(f.Namespace.Name).
+			WithTargetRef(targetRef).
+			WithUpdateMode(vpa_types.UpdateModeRecreate).
+			WithEvictAfterOOMThreshold(&metav1.Duration{Duration: vpaThreshold}).
+			WithContainer(containerName).
+			AppendRecommendation(
+				test.Recommendation().
+					WithContainer(containerName).
+					WithTarget("memory", "2Gi").
+					WithLowerBound("memory", "2Gi").
+					WithUpperBound("memory", "2Gi").
+					GetContainerResources()).
+			Get()
+
+		utils.InstallVPA(f, vpaCRD)
+
+		ginkgo.By("Verifying pods OOMed within threshold (should be < 10s)")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		ginkgo.By("Waiting for pods to be evicted due to quick OOM")
+		err = WaitForPodsEvicted(f, podList, vpaThreshold*2)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 })
