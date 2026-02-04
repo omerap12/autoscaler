@@ -124,11 +124,9 @@ func ValidateVPA(vpa *vpa_types.VerticalPodAutoscaler, isCreate bool) error {
 		if (*mode == vpa_types.UpdateModeInPlaceOrRecreate) && !features.Enabled(features.InPlaceOrRecreate) && isCreate {
 			return fmt.Errorf("in order to use UpdateMode %s, you must enable feature gate %s in the admission-controller args", vpa_types.UpdateModeInPlaceOrRecreate, features.InPlaceOrRecreate)
 		}
-
 		if minReplicas := vpa.Spec.UpdatePolicy.MinReplicas; minReplicas != nil && *minReplicas <= 0 {
 			return fmt.Errorf("minReplicas has to be positive, got %v", *minReplicas)
 		}
-
 	}
 
 	if vpa.Spec.ResourcePolicy != nil {
@@ -168,7 +166,6 @@ func ValidateVPA(vpa *vpa_types.VerticalPodAutoscaler, isCreate bool) error {
 					return fmt.Errorf("max resource for %v is lower than min", resource)
 				}
 			}
-
 			for resource, max := range policy.MaxAllowed {
 				if err := validateResourceResolution(resource, max); err != nil {
 					return fmt.Errorf("maxAllowed: %v", err)
@@ -231,7 +228,6 @@ func validatePerVPAFeatureFlag(vpa *vpa_types.VerticalPodAutoscaler) error {
 				return fmt.Errorf("OOMBumpUpRatio and OOMMinBumpUp are not supported when feature flag %s is disabled", features.PerVPAConfig)
 			}
 		}
-
 	}
 	return nil
 }

@@ -153,7 +153,7 @@ type PodUpdatePolicy struct {
 	// +optional
 	EvictionRequirements []*EvictionRequirement `json:"evictionRequirements,omitempty" protobuf:"bytes,3,opt,name=evictionRequirements"`
 
-	/// EvictAfterOOMSeconds specifies the time in seconds to wait after an OOM event before
+	// EvictAfterOOMSeconds specifies the time in seconds to wait after an OOM event before
 	// considering the pod for eviction. Pods that have OOMed in less than this time
 	// since start will be evicted.
 	// +optional
