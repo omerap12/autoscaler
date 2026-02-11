@@ -157,7 +157,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `updateMode` _[UpdateMode](#updatemode)_ | Controls when autoscaler applies changes to the pod resources.<br />The default is 'Recreate'. |  | Enum: [Off Initial Recreate InPlaceOrRecreate Auto] <br />Optional: \{\} <br /> |
+| `updateMode` _[UpdateMode](#updatemode)_ | Controls when autoscaler applies changes to the pod resources.<br />The default is 'Recreate'. |  | Enum: [Off Initial Recreate InPlaceOrRecreate InPlace Auto] <br />Optional: \{\} <br /> |
 | `minReplicas` _integer_ | Minimal number of replicas which need to be alive for Updater to attempt<br />pod eviction (pending other checks like PDB). Only positive values are<br />allowed. Overrides global '--min-replicas' flag. |  | Optional: \{\} <br /> |
 | `evictionRequirements` _[EvictionRequirement](#evictionrequirement) array_ | EvictionRequirements is a list of EvictionRequirements that need to<br />evaluate to true in order for a Pod to be evicted. If more than one<br />EvictionRequirement is specified, all of them need to be fulfilled to allow eviction. |  | Optional: \{\} <br /> |
 
@@ -210,7 +210,7 @@ _Underlying type:_ _string_
 UpdateMode controls when autoscaler applies changes to the pod resources.
 
 _Validation:_
-- Enum: [Off Initial Recreate InPlaceOrRecreate Auto]
+- Enum: [Off Initial Recreate InPlaceOrRecreate InPlace Auto]
 
 _Appears in:_
 - [PodUpdatePolicy](#podupdatepolicy)
@@ -222,6 +222,7 @@ _Appears in:_
 | `Recreate` | UpdateModeRecreate means that autoscaler assigns resources on pod<br />creation and additionally can update them during the lifetime of the<br />pod by deleting and recreating the pod.<br /> |
 | `Auto` | UpdateModeAuto means that autoscaler assigns resources on pod creation<br />and additionally can update them during the lifetime of the pod,<br />using any available update method. Currently this is equivalent to<br />Recreate.<br />Deprecated: This value is deprecated and will be removed in a future API version.<br />Use explicit update modes like "Recreate", "Initial", or "InPlaceOrRecreate" instead.<br />See https://github.com/kubernetes/autoscaler/issues/8424 for more details.<br /> |
 | `InPlaceOrRecreate` | UpdateModeInPlaceOrRecreate means that autoscaler tries to assign resources in-place.<br />If this is not possible (e.g., resizing takes too long or is infeasible), it falls back to the<br />"Recreate" update mode.<br />Requires VPA level feature gate "InPlaceOrRecreate" to be enabled<br />on the admission and updater pods.<br />Requires cluster feature gate "InPlacePodVerticalScaling" to be enabled.<br /> |
+| `InPlace` | UpdateModeInPlace means that autoscaler will only attempt to update pods in-place<br />and will never evict them. If in-place update fails, autoscaler will rely on<br />Kubelet's automatic retry mechanism.<br />Requires VPA level feature gate "InPlace" to be enabled<br />on the admission and updater pods<br />Requires cluster feature gate "InPlacePodVerticalScaling" to be enabled.<br /> |
 
 
 #### VerticalPodAutoscaler
@@ -396,5 +397,3 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `recommendation` _[RecommendedPodResources](#recommendedpodresources)_ | The most recently computed amount of resources recommended by the<br />autoscaler for the controlled pods. |  | Optional: \{\} <br /> |
 | `conditions` _[VerticalPodAutoscalerCondition](#verticalpodautoscalercondition) array_ | Conditions is the set of conditions required for this autoscaler to scale its target,<br />and indicates whether or not those conditions are met. |  | Optional: \{\} <br /> |
-
-
