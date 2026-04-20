@@ -141,7 +141,8 @@ func (container *ContainerState) GetOOMMinBumpUp() float64 {
 	return container.aggregator.GetOOMMinBumpUp()
 }
 
-// GetMemoryAggregationInterval returns
+// GetMemoryAggregationInterval returns the memory aggregation interval for this container.
+// It delegates to the aggregator's implementation.
 func (container *ContainerState) GetMemoryAggregationInterval() time.Duration {
 	return container.aggregator.GetMemoryAggregationInterval()
 }
