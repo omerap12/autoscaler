@@ -362,7 +362,7 @@ func (a *AggregateContainerState) UpdateFromPolicy(resourcePolicy *vpa_types.Con
 			if features.Enabled(features.PerVPAConfig) {
 				a.MemoryAggregationInterval = time.Second * time.Duration(*resourcePolicy.MemoryAggregationIntervalSeconds)
 			} else {
-				klog.InfoS("MemoryAggregationIntervalSeconds is set but PerVPAConfig feature gate is disabled, falling back to default value")
+				klog.InfoS("memoryAggregationIntervalSeconds is set but %s feature gate is disabled, falling back to default value", features.PerVPAConfig)
 			}
 		}
 
