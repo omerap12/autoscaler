@@ -59,11 +59,11 @@ func newContainerTest() ContainerTest {
 	mockCPUHistogram := new(util.MockHistogram)
 	mockMemoryHistogram := new(util.MockHistogram)
 	aggregateContainerState := &AggregateContainerState{
-		AggregateCPUUsage:         mockCPUHistogram,
-		AggregateMemoryPeaks:      mockMemoryHistogram,
-		OOMBumpUpRatio:            1.2,                                               // Default value, can be adjusted as needed
-		OOMMinBumpUp:              1.048576e+08,                                      // Default value (100Mi), can be adjusted as needed
-		MemoryAggregationInterval: GetAggregationsConfig().MemoryAggregationInterval, // Default value, can be adjusted as needed
+		AggregateCPUUsage:                 mockCPUHistogram,
+		AggregateMemoryPeaks:              mockMemoryHistogram,
+		OOMBumpUpRatio:                    1.2,                                                       // Default value, can be adjusted as needed
+		OOMMinBumpUp:                      1.048576e+08,                                              // Default value (100Mi), can be adjusted as needed
+		MemoryAggregationIntervalDuration: GetAggregationsConfig().MemoryAggregationIntervalDuration, // Default value, can be adjusted as needed
 	}
 	container := &ContainerState{
 		Request:    TestRequest,
@@ -79,7 +79,7 @@ func newContainerTest() ContainerTest {
 
 func newContainerTestWithCustomMemoryInterval(interval time.Duration) ContainerTest {
 	test := newContainerTest()
-	test.aggregateContainerState.MemoryAggregationInterval = interval
+	test.aggregateContainerState.MemoryAggregationIntervalDuration = interval
 	return test
 }
 
@@ -96,7 +96,7 @@ func newContainerTestWithCustomMemoryIntervalCount(count int64) ContainerTest {
 func TestAggregateContainerUsageSamples(t *testing.T) {
 	test := newContainerTest()
 	c := test.container
-	memoryAggregationInterval := GetAggregationsConfig().MemoryAggregationInterval
+	memoryAggregationInterval := GetAggregationsConfig().MemoryAggregationIntervalDuration
 	// Verify that CPU measures are added to the CPU histogram.
 	// The weight should be equal to the current request.
 	timeStep := memoryAggregationInterval / 2
@@ -138,7 +138,7 @@ func TestAggregateContainerUsageSamples(t *testing.T) {
 
 func TestRecordOOMIncreasedByBumpUp(t *testing.T) {
 	test := newContainerTest()
-	memoryAggregationWindowEnd := testTimestamp.Add(GetAggregationsConfig().MemoryAggregationInterval)
+	memoryAggregationWindowEnd := testTimestamp.Add(GetAggregationsConfig().MemoryAggregationIntervalDuration)
 	// Bump Up factor is 20%.
 	test.mockMemoryHistogram.On("AddSample", 1200.0*mb, 1.0, memoryAggregationWindowEnd)
 
@@ -147,7 +147,7 @@ func TestRecordOOMIncreasedByBumpUp(t *testing.T) {
 
 func TestRecordOOMDontRunAway(t *testing.T) {
 	test := newContainerTest()
-	memoryAggregationWindowEnd := testTimestamp.Add(GetAggregationsConfig().MemoryAggregationInterval)
+	memoryAggregationWindowEnd := testTimestamp.Add(GetAggregationsConfig().MemoryAggregationIntervalDuration)
 
 	// Bump Up factor is 20%.
 	test.mockMemoryHistogram.On("AddSample", 1200.0*mb, 1.0, memoryAggregationWindowEnd)
@@ -165,7 +165,7 @@ func TestRecordOOMDontRunAway(t *testing.T) {
 
 func TestRecordOOMIncreasedByMin(t *testing.T) {
 	test := newContainerTest()
-	memoryAggregationWindowEnd := testTimestamp.Add(GetAggregationsConfig().MemoryAggregationInterval)
+	memoryAggregationWindowEnd := testTimestamp.Add(GetAggregationsConfig().MemoryAggregationIntervalDuration)
 	// Min grow by 100Mb.
 	test.mockMemoryHistogram.On("AddSample", 101.0*mb, 1.0, memoryAggregationWindowEnd)
 
@@ -174,7 +174,7 @@ func TestRecordOOMIncreasedByMin(t *testing.T) {
 
 func TestRecordOOMMaxedWithKnownSample(t *testing.T) {
 	test := newContainerTest()
-	memoryAggregationWindowEnd := testTimestamp.Add(GetAggregationsConfig().MemoryAggregationInterval)
+	memoryAggregationWindowEnd := testTimestamp.Add(GetAggregationsConfig().MemoryAggregationIntervalDuration)
 
 	test.mockMemoryHistogram.On("AddSample", 3000.0*mb, 1.0, memoryAggregationWindowEnd)
 	assert.True(t, test.container.AddSample(newUsageSample(testTimestamp, 3000*mb, ResourceMemory)))
@@ -188,7 +188,7 @@ func TestRecordOOMMaxedWithKnownSample(t *testing.T) {
 
 func TestRecordOOMDiscardsOldSample(t *testing.T) {
 	test := newContainerTest()
-	memoryAggregationWindowEnd := testTimestamp.Add(GetAggregationsConfig().MemoryAggregationInterval)
+	memoryAggregationWindowEnd := testTimestamp.Add(GetAggregationsConfig().MemoryAggregationIntervalDuration)
 
 	test.mockMemoryHistogram.On("AddSample", 1000.0*mb, 1.0, memoryAggregationWindowEnd)
 	assert.True(t, test.container.AddSample(newUsageSample(testTimestamp, 1000*mb, ResourceMemory)))
@@ -199,7 +199,7 @@ func TestRecordOOMDiscardsOldSample(t *testing.T) {
 
 func TestRecordOOMInNewWindow(t *testing.T) {
 	test := newContainerTest()
-	memoryAggregationInterval := GetAggregationsConfig().MemoryAggregationInterval
+	memoryAggregationInterval := GetAggregationsConfig().MemoryAggregationIntervalDuration
 	memoryAggregationWindowEnd := testTimestamp.Add(memoryAggregationInterval)
 
 	test.mockMemoryHistogram.On("AddSample", 2000.0*mb, 1.0, memoryAggregationWindowEnd)
@@ -303,7 +303,7 @@ func TestRecordOOMDiscardsOldSampleWithCustomIntervalCount(t *testing.T) {
 	test := newContainerTestWithCustomMemoryIntervalCount(2)
 	c := test.container
 
-	interval := GetAggregationsConfig().MemoryAggregationInterval
+	interval := GetAggregationsConfig().MemoryAggregationIntervalDuration
 	windowEnd := testTimestamp.Add(interval)
 	test.mockMemoryHistogram.On("AddSample", 1000.0*mb, 1.0, windowEnd)
 	assert.True(t, c.AddSample(newUsageSample(testTimestamp, 1000*mb, ResourceMemory)))
@@ -323,7 +323,7 @@ func TestMemorySamplesWithCustomAggregationIntervalCount(t *testing.T) {
 	test := newContainerTestWithCustomMemoryIntervalCount(16)
 	c := test.container
 
-	interval := GetAggregationsConfig().MemoryAggregationInterval
+	interval := GetAggregationsConfig().MemoryAggregationIntervalDuration
 
 	windowEnd1 := testTimestamp.Add(interval)
 	// First sample opens the first window.

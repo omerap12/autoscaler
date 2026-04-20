@@ -297,7 +297,7 @@ func TestUpdateFromPolicyControlledResources(t *testing.T) {
 }
 
 func TestUpdateFromPolicyMemoryAggregationInterval(t *testing.T) {
-	defaultInterval := GetAggregationsConfig().MemoryAggregationInterval
+	defaultInterval := GetAggregationsConfig().MemoryAggregationIntervalDuration
 	customSeconds := int32(3600)
 	testCases := []struct {
 		name             string
@@ -339,7 +339,7 @@ func TestUpdateFromPolicyMemoryAggregationInterval(t *testing.T) {
 			featuregatetesting.SetFeatureGateDuringTest(t, features.MutableFeatureGate, features.PerVPAConfig, tc.featureEnabled)
 			cs := NewAggregateContainerState()
 			cs.UpdateFromPolicy(tc.policy)
-			assert.Equal(t, tc.expectedInterval, cs.GetMemoryAggregationInterval())
+			assert.Equal(t, tc.expectedInterval, cs.GetMemoryAggregationIntervalDuration())
 		})
 	}
 }
@@ -393,7 +393,7 @@ func TestUpdateFromPolicyMemoryAggregationIntervalCount(t *testing.T) {
 }
 
 func TestAggregateContainerStateIsExpiredWithCustomIntervalCount(t *testing.T) {
-	defaultInterval := GetAggregationsConfig().MemoryAggregationInterval
+	defaultInterval := GetAggregationsConfig().MemoryAggregationIntervalDuration
 	customCount := int64(4)
 
 	// With count=4 and default 24h interval, window = 4*24h = 96h.
