@@ -297,7 +297,7 @@ type ContainerResourcePolicy struct {
 	// +optional
 	OOMMinBumpUp *resource.Quantity `json:"oomMinBumpUp,omitempty" protobuf:"bytes,8,opt,name=oomMinBumpUp"`
 
-	// MemoryAggregationIntervalSeconds is the length of a single interval
+	// memoryAggregationIntervalSeconds is the length of a single interval
 	// (in seconds) for which the peak memory usage is computed.
 	// Memory usage peaks are aggregated in multiples of this interval.
 	// In other words, there is one memory usage sample per interval
