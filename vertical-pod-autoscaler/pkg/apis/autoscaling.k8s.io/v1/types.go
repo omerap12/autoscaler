@@ -306,7 +306,7 @@ type ContainerResourcePolicy struct {
 	// +kubebuilder:validation:Minimum=1
 	MemoryAggregationIntervalSeconds *int32 `json:"memoryAggregationIntervalSeconds,omitempty" protobuf:"varint,9,opt,name=memoryAggregationInterval"`
 
-	// MemoryAggregationIntervalCount is the number of consecutive
+	// memoryAggregationIntervalCount is the number of consecutive
 	// MemoryAggregationIntervals which make up the memory aggregation window.
 	// The total window length is:
 	// MemoryAggregationIntervalSeconds * MemoryAggregationIntervalCount.
