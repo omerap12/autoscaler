@@ -89,7 +89,7 @@ type ContainerStateAggregator interface {
 	GetOOMBumpUpRatio() float64
 	// GetOOMMinBumpUp returns the minimum OOM bump up value for this container
 	GetOOMMinBumpUp() float64
-	//  MemoryAggregationInterval returns
+	// GetMemoryAggregationInterval returns the memory aggregation interval for this container.
 	GetMemoryAggregationInterval() time.Duration
 }
 
