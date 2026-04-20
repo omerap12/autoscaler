@@ -111,9 +111,9 @@ func (a *AggregationsConfig) memoryHistogramOptions() util.HistogramOptions {
 }
 
 // NewAggregationsConfig creates a new AggregationsConfig based on the supplied parameters and default values.
-func NewAggregationsConfig(MemoryAggregationIntervalDuration time.Duration, memoryAggregationIntervalCount int64, memoryHistogramDecayHalfLife, cpuHistogramDecayHalfLife time.Duration, oomBumpUpRatio float64, oomMinBumpUp float64) *AggregationsConfig {
+func NewAggregationsConfig(memoryAggregationIntervalDuration time.Duration, memoryAggregationIntervalCount int64, memoryHistogramDecayHalfLife, cpuHistogramDecayHalfLife time.Duration, oomBumpUpRatio float64, oomMinBumpUp float64) *AggregationsConfig {
 	a := &AggregationsConfig{
-		MemoryAggregationIntervalDuration: MemoryAggregationIntervalDuration,
+		MemoryAggregationIntervalDuration: memoryAggregationIntervalDuration,
 		MemoryAggregationIntervalCount:    memoryAggregationIntervalCount,
 		HistogramBucketSizeGrowth:         DefaultHistogramBucketSizeGrowth,
 		MemoryHistogramDecayHalfLife:      memoryHistogramDecayHalfLife,
