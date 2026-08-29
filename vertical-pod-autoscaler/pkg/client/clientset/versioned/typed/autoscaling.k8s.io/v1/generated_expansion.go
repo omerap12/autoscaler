@@ -21,3 +21,7 @@ package v1
 type VerticalPodAutoscalerExpansion interface{}
 
 type VerticalPodAutoscalerCheckpointExpansion interface{}
+
+type VerticalPodAutoscalerSliceExpansion interface{}
+
+type VerticalPodAutoscalerSliceCheckpointExpansion interface{}

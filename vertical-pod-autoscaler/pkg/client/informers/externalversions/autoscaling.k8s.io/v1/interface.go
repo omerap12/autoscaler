@@ -28,6 +28,10 @@ type Interface interface {
 	VerticalPodAutoscalers() TypedVerticalPodAutoscalerInformer
 	// VerticalPodAutoscalerCheckpoints returns a VerticalPodAutoscalerCheckpointInformer.
 	VerticalPodAutoscalerCheckpoints() TypedVerticalPodAutoscalerCheckpointInformer
+	// VerticalPodAutoscalerSlices returns a VerticalPodAutoscalerSliceInformer.
+	VerticalPodAutoscalerSlices() TypedVerticalPodAutoscalerSliceInformer
+	// VerticalPodAutoscalerSliceCheckpoints returns a VerticalPodAutoscalerSliceCheckpointInformer.
+	VerticalPodAutoscalerSliceCheckpoints() TypedVerticalPodAutoscalerSliceCheckpointInformer
 }
 
 type version struct {
@@ -49,4 +53,14 @@ func (v *version) VerticalPodAutoscalers() TypedVerticalPodAutoscalerInformer {
 // VerticalPodAutoscalerCheckpoints returns a TypedVerticalPodAutoscalerCheckpointInformer.
 func (v *version) VerticalPodAutoscalerCheckpoints() TypedVerticalPodAutoscalerCheckpointInformer {
 	return &verticalPodAutoscalerCheckpointInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// VerticalPodAutoscalerSlices returns a TypedVerticalPodAutoscalerSliceInformer.
+func (v *version) VerticalPodAutoscalerSlices() TypedVerticalPodAutoscalerSliceInformer {
+	return &verticalPodAutoscalerSliceInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// VerticalPodAutoscalerSliceCheckpoints returns a TypedVerticalPodAutoscalerSliceCheckpointInformer.
+func (v *version) VerticalPodAutoscalerSliceCheckpoints() TypedVerticalPodAutoscalerSliceCheckpointInformer {
+	return &verticalPodAutoscalerSliceCheckpointInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }

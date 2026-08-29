@@ -60,6 +60,10 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Autoscaling().V1().VerticalPodAutoscalers().Informer()}, nil
 	case v1.SchemeGroupVersion.WithResource("verticalpodautoscalercheckpoints"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Autoscaling().V1().VerticalPodAutoscalerCheckpoints().Informer()}, nil
+	case v1.SchemeGroupVersion.WithResource("verticalpodautoscalerslices"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Autoscaling().V1().VerticalPodAutoscalerSlices().Informer()}, nil
+	case v1.SchemeGroupVersion.WithResource("verticalpodautoscalerslicecheckpoints"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Autoscaling().V1().VerticalPodAutoscalerSliceCheckpoints().Informer()}, nil
 
 		// Group=autoscaling.k8s.io, Version=v1beta1
 	case v1beta1.SchemeGroupVersion.WithResource("verticalpodautoscalers"):

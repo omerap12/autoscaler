@@ -30,6 +30,8 @@ type AutoscalingV1Interface interface {
 	RESTClient() rest.Interface
 	VerticalPodAutoscalersGetter
 	VerticalPodAutoscalerCheckpointsGetter
+	VerticalPodAutoscalerSlicesGetter
+	VerticalPodAutoscalerSliceCheckpointsGetter
 }
 
 // AutoscalingV1Client is used to interact with features provided by the autoscaling.k8s.io group.
@@ -43,6 +45,14 @@ func (c *AutoscalingV1Client) VerticalPodAutoscalers(namespace string) VerticalP
 
 func (c *AutoscalingV1Client) VerticalPodAutoscalerCheckpoints(namespace string) VerticalPodAutoscalerCheckpointInterface {
 	return newVerticalPodAutoscalerCheckpoints(c, namespace)
+}
+
+func (c *AutoscalingV1Client) VerticalPodAutoscalerSlices(namespace string) VerticalPodAutoscalerSliceInterface {
+	return newVerticalPodAutoscalerSlices(c, namespace)
+}
+
+func (c *AutoscalingV1Client) VerticalPodAutoscalerSliceCheckpoints(namespace string) VerticalPodAutoscalerSliceCheckpointInterface {
+	return newVerticalPodAutoscalerSliceCheckpoints(c, namespace)
 }
 
 // NewForConfig creates a new AutoscalingV1Client for the given config.
