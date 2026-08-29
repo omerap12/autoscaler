@@ -28,6 +28,7 @@ import (
 	"k8s.io/klog/v2"
 
 	vpa_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
+	vpaslices_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1alpha1"
 	controllerfetcher "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/target/controller_fetcher"
 	vpa_utils "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/vpa"
 )
@@ -52,7 +53,9 @@ type ClusterState interface {
 	AddSample(sample *ContainerUsageSampleWithKey) error
 	RecordOOM(containerID ContainerID, timestamp time.Time, requestedMemory ResourceAmount) error
 	AddOrUpdateVpa(apiObject *vpa_types.VerticalPodAutoscaler, selector labels.Selector) error
+	AddOrUpdateVpaSlice(apiObject *vpaslices_types.VerticalPodAutoscalerSlice) error
 	DeleteVpa(vpaID VpaID) error
+	DeleteVpaSlice(vpaSliceID VpaSliceID) error
 	MakeAggregateStateKey(pod *PodState, containerName string) AggregateStateKey
 	RateLimitedGarbageCollectAggregateCollectionStates(ctx context.Context, now time.Time, controllerFetcher controllerfetcher.ControllerFetcher)
 	RecordRecommendation(vpa *Vpa, now time.Time) error
@@ -60,6 +63,7 @@ type ClusterState interface {
 	GetControllerForPodUnderVPA(ctx context.Context, pod *PodState, controllerFetcher controllerfetcher.ControllerFetcher) *controllerfetcher.ControllerKeyWithAPIVersion
 	GetControllingVPA(pod *PodState) *Vpa
 	VPAs() map[VpaID]*Vpa
+	VPASlices() map[VpaSliceID]*VpaSlice
 	SetObservedVPAs([]*vpa_types.VerticalPodAutoscaler)
 	ObservedVPAs() []*vpa_types.VerticalPodAutoscaler
 	Pods() map[PodID]*PodState
@@ -77,6 +81,9 @@ type clusterState struct {
 	emptyVPAs map[VpaID]time.Time
 	// Observed VPAs. Used to check if there are updates needed.
 	observedVPAs []*vpa_types.VerticalPodAutoscaler
+
+	// VPASlice objects in the cluster.
+	vpaSlices map[VpaSliceID]*VpaSlice
 
 	// All container aggregations where the usage samples are stored.
 	aggregateStateMap aggregateContainerStatesMap
@@ -134,6 +141,7 @@ func NewClusterState(gcInterval time.Duration) *clusterState {
 		pods:                          make(map[PodID]*PodState),
 		vpas:                          make(map[VpaID]*Vpa),
 		emptyVPAs:                     make(map[VpaID]time.Time),
+		vpaSlices:                     make(map[VpaSliceID]*VpaSlice),
 		aggregateStateMap:             make(aggregateContainerStatesMap),
 		labelSetMap:                   make(labelSetMap),
 		lastAggregateContainerStateGC: time.Unix(0, 0),
@@ -195,7 +203,7 @@ func (cluster *clusterState) SetInitContainers(podID PodID, initContainers []str
 func (cluster *clusterState) addPodToItsVpa(pod *PodState) {
 	for _, vpa := range cluster.vpas {
 		if vpa_utils.PodLabelsMatchVPA(pod.ID.Namespace, cluster.labelSetMap[pod.labelSetKey], vpa.ID.Namespace, vpa.PodSelector) {
-			vpa.PodCount++
+
 		}
 	}
 }
@@ -359,6 +367,49 @@ func (cluster *clusterState) SetObservedVPAs(observedVPAs []*vpa_types.VerticalP
 
 func (cluster *clusterState) ObservedVPAs() []*vpa_types.VerticalPodAutoscaler {
 	return cluster.observedVPAs
+}
+
+// AddOrUpdateVpaSlice updates the model with a VPASlice API object.
+func (cluster *clusterState) AddOrUpdateVpaSlice(apiObject *vpaslices_types.VerticalPodAutoscalerSlice) error {
+	sliceID := VpaSliceID{Namespace: apiObject.Namespace, SliceName: apiObject.Name}
+
+	conditionsMap := make(vpaConditionsMap)
+	for _, condition := range apiObject.Status.Conditions {
+		conditionsMap[condition.Type] = condition
+	}
+
+	slice, exists := cluster.vpaSlices[sliceID]
+	if !exists {
+		slice = NewVpaSlice(
+			sliceID,
+			apiObject.Spec.VPAName,
+			apiObject.Spec.NodeSelector,
+			apiObject.CreationTimestamp.Time,
+		)
+		cluster.vpaSlices[sliceID] = slice
+	}
+	slice.VPAName = apiObject.Spec.VPAName
+	slice.NodeSelector = apiObject.Spec.NodeSelector
+	slice.conditions = conditionsMap
+	if conditionsMap[vpa_types.RecommendationProvided].Status == corev1.ConditionTrue {
+		slice.recommendation = apiObject.Status.Recommendation
+	}
+	return nil
+}
+
+// DeleteVpaSlice removes a VPASlice with the given ID from the clusterState.
+func (cluster *clusterState) DeleteVpaSlice(sliceID VpaSliceID) error {
+	_, exists := cluster.vpaSlices[sliceID]
+	if !exists {
+		return NewKeyError(sliceID)
+	}
+	delete(cluster.vpaSlices, sliceID)
+	return nil
+}
+
+// VPASlices returns the map of VPASlice objects in the cluster.
+func (cluster *clusterState) VPASlices() map[VpaSliceID]*VpaSlice {
+	return cluster.vpaSlices
 }
 
 func newPod(id PodID) *PodState {

@@ -36,6 +36,11 @@ import (
 	vpa_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
 	vpa_api "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/typed/autoscaling.k8s.io/v1"
 	vpa_lister "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/listers/autoscaling.k8s.io/v1"
+
+	vpaslices_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1alpha1"
+	vpaslices_api "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/typed/autoscaling.k8s.io/v1alpha1"
+	vpaslices_lister "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/listers/autoscaling.k8s.io/v1alpha1"
+
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/history"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/metrics"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/oom"
@@ -64,6 +69,9 @@ type ClusterStateFeeder interface {
 
 	// LoadVPAs updates clusterState with current state of VPAs.
 	LoadVPAs(ctx context.Context)
+
+	// LoadVPASlices updates clusterState with current state of vpaSlices.
+	LoadVPASlices(ctx context.Context)
 
 	// LoadPods updates clusterState with current specification of Pods and their Containers.
 	LoadPods()
@@ -211,20 +219,23 @@ func NewPodListerAndOOMObserver(ctx context.Context, kubeClient kube_client.Inte
 }
 
 type clusterStateFeeder struct {
-	specClient          spec.SpecClient
-	metricsClient       metrics.MetricsClient
-	oomChan             <-chan oom.OomInfo
-	vpaCheckpointClient vpa_api.VerticalPodAutoscalerCheckpointsGetter
-	vpaCheckpointLister vpa_lister.VerticalPodAutoscalerCheckpointLister
-	vpaLister           vpa_lister.VerticalPodAutoscalerLister
-	clusterState        model.ClusterState
-	selectorFetcher     target.VpaTargetSelectorFetcher
-	memorySaveMode      bool
-	controllerFetcher   controllerfetcher.ControllerFetcher
-	recommenderName     string
-	ignoredNamespaces   []string
-	vpaObjectNamespace  string
-	podsToDelete        []model.PodID
+	specClient                spec.SpecClient
+	metricsClient             metrics.MetricsClient
+	oomChan                   <-chan oom.OomInfo
+	vpaCheckpointClient       vpa_api.VerticalPodAutoscalerCheckpointsGetter
+	vpaCheckpointSlicesClient vpaslices_api.VerticalPodAutoscalerSliceCheckpointsGetter
+	vpaCheckpointLister       vpa_lister.VerticalPodAutoscalerCheckpointLister
+	vpaCheckpointSlicesLister vpaslices_lister.VerticalPodAutoscalerSliceCheckpointLister
+	vpaLister                 vpa_lister.VerticalPodAutoscalerLister
+	vpaSlicesLister           vpaslices_lister.VerticalPodAutoscalerSliceLister
+	clusterState              model.ClusterState
+	selectorFetcher           target.VpaTargetSelectorFetcher
+	memorySaveMode            bool
+	controllerFetcher         controllerfetcher.ControllerFetcher
+	recommenderName           string
+	ignoredNamespaces         []string
+	vpaObjectNamespace        string
+	podsToDelete              []model.PodID
 }
 
 func (feeder *clusterStateFeeder) InitFromHistoryProvider(historyProvider history.HistoryProvider) {
@@ -404,6 +415,11 @@ func filterVPAs(feeder *clusterStateFeeder, allVpaCRDs []*vpa_types.VerticalPodA
 	return vpaCRDs
 }
 
+func filterVPASlices(feeder *clusterStateFeeder, allVPASlicesCRDs []*vpaslices_types.VerticalPodAutoscalerSlice) []*vpaslices_types.VerticalPodAutoscalerSlice {
+	// TODO: fill this.
+	return nil
+}
+
 // LoadVPAs fetches VPA objects and loads them into the cluster state.
 func (feeder *clusterStateFeeder) LoadVPAs(ctx context.Context) {
 	// List VPA API objects.
@@ -451,6 +467,42 @@ func (feeder *clusterStateFeeder) LoadVPAs(ctx context.Context) {
 		}
 	}
 	feeder.clusterState.SetObservedVPAs(vpaCRDs)
+}
+
+func (feeder *clusterStateFeeder) LoadVPASlices(ctx context.Context) {
+	// TODO: feel this function
+	allVpaSlicesCRDs, err := feeder.vpaSlicesLister.List(labels.Everything())
+	if err != nil {
+		klog.ErrorS(err, "Cannot list vpaSlices")
+		return
+	}
+
+	// Filter out vpaSlices that specified recommenders with names not equal to "default"
+	vpaSlicesCRDs := filterVPASlices(feeder, allVpaSlicesCRDs)
+
+	klog.V(3).InfoS("Fetching VPASlices", "count", len(vpaSlicesCRDs))
+	// Add or update existing VPAs in the model.
+
+	sliceKeys := make(map[model.VpaSliceID]bool)
+	for _, sliceCRD := range vpaSlicesCRDs {
+		sliceID := model.VpaSliceID{
+			Namespace: sliceCRD.Namespace,
+			SliceName: sliceCRD.Name,
+		}
+		if feeder.clusterState.AddOrUpdateVpaSlice(sliceCRD) == nil {
+			sliceKeys[sliceID] = true
+		}
+	}
+	// Delete non-existent VPASlices from the model.
+	for sliceID := range feeder.clusterState.VPASlices() {
+		if _, exists := sliceKeys[sliceID]; !exists {
+			klog.V(3).InfoS("Deleting VPASlice", "vpaSlice", klog.KRef(sliceID.Namespace, sliceID.SliceName))
+			if err := feeder.clusterState.DeleteVpaSlice(sliceID); err != nil {
+				klog.ErrorS(err, "Deleting VPASlice failed", "vpaSlice", klog.KRef(sliceID.Namespace, sliceID.SliceName))
+			}
+		}
+	}
+
 }
 
 // LoadPods loads pod into the cluster state.

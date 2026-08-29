@@ -219,3 +219,9 @@ type VpaID struct {
 	Namespace string
 	VpaName   string
 }
+
+// VpaSliceID contains information needed to identify a VPASlice API object within a cluster.
+type VpaSliceID struct {
+	Namespace string
+	SliceName string
+}

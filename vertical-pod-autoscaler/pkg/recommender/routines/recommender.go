@@ -151,6 +151,10 @@ func (r *recommender) UpdateVPAs() {
 	wg.Wait()
 }
 
+func (r *recommender) UpdateVPASlices() {
+	// TODO: fill this
+}
+
 func (r *recommender) MaintainCheckpoints(ctx context.Context) {
 	if r.useCheckpoints {
 		r.checkpointWriter.StoreCheckpoints(ctx, r.updateWorkerCount)
@@ -160,6 +164,10 @@ func (r *recommender) MaintainCheckpoints(ctx context.Context) {
 			r.clusterStateFeeder.GarbageCollectCheckpoints(ctx)
 		}
 	}
+}
+
+func (r *recommender) MaintainCheckpointSlices(ctx context.Context) {
+	// TODO: fill this function
 }
 
 func (r *recommender) RunOnce() {
@@ -172,6 +180,9 @@ func (r *recommender) RunOnce() {
 
 	r.clusterStateFeeder.LoadVPAs(ctx)
 	timer.ObserveStep("LoadVPAs")
+
+	r.clusterStateFeeder.LoadVPASlices(ctx)
+	timer.ObserveStep("LoadVPASlices")
 
 	r.clusterStateFeeder.LoadPods()
 	timer.ObserveStep("LoadPods")
@@ -187,10 +198,16 @@ func (r *recommender) RunOnce() {
 	r.UpdateVPAs()
 	timer.ObserveStep("UpdateVPAs")
 
+	r.UpdateVPASlices()
+	timer.ObserveStep("UpdateVPASlices")
+
 	stepCtx, cancelFunc := context.WithDeadline(ctx, time.Now().Add(r.checkpointsWriteTimeout))
 	defer cancelFunc()
 	r.MaintainCheckpoints(stepCtx)
 	timer.ObserveStep("MaintainCheckpoints")
+
+	r.MaintainCheckpointSlices(stepCtx)
+	timer.ObserveStep("MaintainCheckpointSlices")
 
 	r.clusterState.RateLimitedGarbageCollectAggregateCollectionStates(ctx, time.Now(), r.controllerFetcher)
 	timer.ObserveStep("GarbageCollect")
