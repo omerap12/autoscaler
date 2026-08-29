@@ -1,5 +1,5 @@
 /*
-Copyright 2019 The Kubernetes Authors.
+Copyright 2026 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1
+package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -23,7 +23,7 @@ import (
 )
 
 // SchemeGroupVersion is group version used to register these objects
-var SchemeGroupVersion = schema.GroupVersion{Group: "autoscaling.k8s.io", Version: "v1"}
+var SchemeGroupVersion = schema.GroupVersion{Group: "autoscaling.k8s.io", Version: "v1alpha1"}
 
 // Resource takes an unqualified resource and returns a Group qualified GroupResource
 func Resource(resource string) schema.GroupResource {
@@ -48,10 +48,10 @@ func init() {
 // Adds the list of known types to api.Scheme.
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
-		&VerticalPodAutoscaler{},
-		&VerticalPodAutoscalerList{},
-		&VerticalPodAutoscalerCheckpoint{},
-		&VerticalPodAutoscalerCheckpointList{},
+		&VerticalPodAutoscalerSlice{},
+		&VerticalPodAutoscalerSliceList{},
+		&VerticalPodAutoscalerSliceCheckpoint{},
+		&VerticalPodAutoscalerSliceCheckpointList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil

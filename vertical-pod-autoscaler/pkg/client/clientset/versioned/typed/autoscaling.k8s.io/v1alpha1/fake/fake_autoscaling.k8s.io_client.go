@@ -19,26 +19,26 @@ limitations under the License.
 package fake
 
 import (
-	v1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/typed/autoscaling.k8s.io/v1"
+	v1alpha1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/typed/autoscaling.k8s.io/v1alpha1"
 	rest "k8s.io/client-go/rest"
 	testing "k8s.io/client-go/testing"
 )
 
-type FakeAutoscalingV1 struct {
+type FakeAutoscalingV1alpha1 struct {
 	*testing.Fake
 }
 
-func (c *FakeAutoscalingV1) VerticalPodAutoscalers(namespace string) v1.VerticalPodAutoscalerInterface {
-	return newFakeVerticalPodAutoscalers(c, namespace)
+func (c *FakeAutoscalingV1alpha1) VerticalPodAutoscalerSlices(namespace string) v1alpha1.VerticalPodAutoscalerSliceInterface {
+	return newFakeVerticalPodAutoscalerSlices(c, namespace)
 }
 
-func (c *FakeAutoscalingV1) VerticalPodAutoscalerCheckpoints(namespace string) v1.VerticalPodAutoscalerCheckpointInterface {
-	return newFakeVerticalPodAutoscalerCheckpoints(c, namespace)
+func (c *FakeAutoscalingV1alpha1) VerticalPodAutoscalerSliceCheckpoints(namespace string) v1alpha1.VerticalPodAutoscalerSliceCheckpointInterface {
+	return newFakeVerticalPodAutoscalerSliceCheckpoints(c, namespace)
 }
 
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
-func (c *FakeAutoscalingV1) RESTClient() rest.Interface {
+func (c *FakeAutoscalingV1alpha1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
 }

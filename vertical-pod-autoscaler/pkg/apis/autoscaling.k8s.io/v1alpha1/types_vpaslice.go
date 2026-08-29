@@ -14,10 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1
+package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	vpa "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
 )
 
 // ---- Labels used to associate VPASlice objects with their parent VPA ----
@@ -93,14 +95,14 @@ type VerticalPodAutoscalerSliceStatus struct {
 	// for containers of pods running on nodes matching this slice's selector.
 	// Reuses the same RecommendedPodResources type as VerticalPodAutoscalerStatus.
 	// +optional
-	Recommendation *RecommendedPodResources `json:"recommendation,omitempty"`
+	Recommendation *vpa.RecommendedPodResources `json:"recommendation,omitempty"`
 
 	// Conditions is the set of conditions for this slice, indicating whether
 	// a recommendation could be computed.
 	// +optional
 	// +patchMergeKey=type
 	// +patchStrategy=merge
-	Conditions []VerticalPodAutoscalerCondition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+	Conditions []vpa.VerticalPodAutoscalerCondition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 
 	// ObservedGeneration is the most recent generation observed by the
 	// recommender for this slice.
@@ -190,10 +192,10 @@ type ContainerHistogramCheckpoint struct {
 	ContainerName string `json:"containerName"`
 
 	// Checkpoint of histogram for consumption of CPU.
-	CPUHistogram HistogramCheckpoint `json:"cpuHistogram,omitempty"`
+	CPUHistogram vpa.HistogramCheckpoint `json:"cpuHistogram,omitempty"`
 
 	// Checkpoint of histogram for consumption of memory.
-	MemoryHistogram HistogramCheckpoint `json:"memoryHistogram,omitempty"`
+	MemoryHistogram vpa.HistogramCheckpoint `json:"memoryHistogram,omitempty"`
 
 	// Timestamp of the first sample from the histograms.
 	// +nullable

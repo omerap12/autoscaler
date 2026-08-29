@@ -23,6 +23,7 @@ import (
 	http "net/http"
 
 	autoscalingv1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/typed/autoscaling.k8s.io/v1"
+	autoscalingv1alpha1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/typed/autoscaling.k8s.io/v1alpha1"
 	autoscalingv1beta1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/typed/autoscaling.k8s.io/v1beta1"
 	autoscalingv1beta2 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/typed/autoscaling.k8s.io/v1beta2"
 	pocv1alpha1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/typed/poc.autoscaling.k8s.io/v1alpha1"
@@ -34,6 +35,7 @@ import (
 type Interface interface {
 	Discovery() discovery.DiscoveryInterfaces
 	AutoscalingV1() autoscalingv1.AutoscalingV1Interface
+	AutoscalingV1alpha1() autoscalingv1alpha1.AutoscalingV1alpha1Interface
 	AutoscalingV1beta1() autoscalingv1beta1.AutoscalingV1beta1Interface
 	AutoscalingV1beta2() autoscalingv1beta2.AutoscalingV1beta2Interface
 	PocV1alpha1() pocv1alpha1.PocV1alpha1Interface
@@ -42,15 +44,21 @@ type Interface interface {
 // Clientset contains the clients for groups.
 type Clientset struct {
 	*discovery.DiscoveryClient
-	autoscalingV1      *autoscalingv1.AutoscalingV1Client
-	autoscalingV1beta1 *autoscalingv1beta1.AutoscalingV1beta1Client
-	autoscalingV1beta2 *autoscalingv1beta2.AutoscalingV1beta2Client
-	pocV1alpha1        *pocv1alpha1.PocV1alpha1Client
+	autoscalingV1       *autoscalingv1.AutoscalingV1Client
+	autoscalingV1alpha1 *autoscalingv1alpha1.AutoscalingV1alpha1Client
+	autoscalingV1beta1  *autoscalingv1beta1.AutoscalingV1beta1Client
+	autoscalingV1beta2  *autoscalingv1beta2.AutoscalingV1beta2Client
+	pocV1alpha1         *pocv1alpha1.PocV1alpha1Client
 }
 
 // AutoscalingV1 retrieves the AutoscalingV1Client
 func (c *Clientset) AutoscalingV1() autoscalingv1.AutoscalingV1Interface {
 	return c.autoscalingV1
+}
+
+// AutoscalingV1alpha1 retrieves the AutoscalingV1alpha1Client
+func (c *Clientset) AutoscalingV1alpha1() autoscalingv1alpha1.AutoscalingV1alpha1Interface {
+	return c.autoscalingV1alpha1
 }
 
 // AutoscalingV1beta1 retrieves the AutoscalingV1beta1Client
@@ -116,6 +124,10 @@ func NewForConfigAndClient(c *rest.Config, httpClient *http.Client) (*Clientset,
 	if err != nil {
 		return nil, err
 	}
+	cs.autoscalingV1alpha1, err = autoscalingv1alpha1.NewForConfigAndClient(&configShallowCopy, httpClient)
+	if err != nil {
+		return nil, err
+	}
 	cs.autoscalingV1beta1, err = autoscalingv1beta1.NewForConfigAndClient(&configShallowCopy, httpClient)
 	if err != nil {
 		return nil, err
@@ -150,6 +162,7 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 func New(c rest.Interface) *Clientset {
 	var cs Clientset
 	cs.autoscalingV1 = autoscalingv1.New(c)
+	cs.autoscalingV1alpha1 = autoscalingv1alpha1.New(c)
 	cs.autoscalingV1beta1 = autoscalingv1beta1.New(c)
 	cs.autoscalingV1beta2 = autoscalingv1beta2.New(c)
 	cs.pocV1alpha1 = pocv1alpha1.New(c)

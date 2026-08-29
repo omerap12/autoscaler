@@ -23,9 +23,10 @@ import (
 
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	v1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
+	v1alpha1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1alpha1"
 	v1beta1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1beta1"
 	v1beta2 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1beta2"
-	v1alpha1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/poc.autoscaling.k8s.io/v1alpha1"
+	pocautoscalingk8siov1alpha1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/poc.autoscaling.k8s.io/v1alpha1"
 	cache "k8s.io/client-go/tools/cache"
 )
 
@@ -60,10 +61,12 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Autoscaling().V1().VerticalPodAutoscalers().Informer()}, nil
 	case v1.SchemeGroupVersion.WithResource("verticalpodautoscalercheckpoints"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Autoscaling().V1().VerticalPodAutoscalerCheckpoints().Informer()}, nil
-	case v1.SchemeGroupVersion.WithResource("verticalpodautoscalerslices"):
-		return &genericInformer{resource: resource.GroupResource(), informer: f.Autoscaling().V1().VerticalPodAutoscalerSlices().Informer()}, nil
-	case v1.SchemeGroupVersion.WithResource("verticalpodautoscalerslicecheckpoints"):
-		return &genericInformer{resource: resource.GroupResource(), informer: f.Autoscaling().V1().VerticalPodAutoscalerSliceCheckpoints().Informer()}, nil
+
+		// Group=autoscaling.k8s.io, Version=v1alpha1
+	case v1alpha1.SchemeGroupVersion.WithResource("verticalpodautoscalerslices"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Autoscaling().V1alpha1().VerticalPodAutoscalerSlices().Informer()}, nil
+	case v1alpha1.SchemeGroupVersion.WithResource("verticalpodautoscalerslicecheckpoints"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Autoscaling().V1alpha1().VerticalPodAutoscalerSliceCheckpoints().Informer()}, nil
 
 		// Group=autoscaling.k8s.io, Version=v1beta1
 	case v1beta1.SchemeGroupVersion.WithResource("verticalpodautoscalers"):
@@ -78,9 +81,9 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Autoscaling().V1beta2().VerticalPodAutoscalerCheckpoints().Informer()}, nil
 
 		// Group=poc.autoscaling.k8s.io, Version=v1alpha1
-	case v1alpha1.SchemeGroupVersion.WithResource("verticalpodautoscalers"):
+	case pocautoscalingk8siov1alpha1.SchemeGroupVersion.WithResource("verticalpodautoscalers"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Poc().V1alpha1().VerticalPodAutoscalers().Informer()}, nil
-	case v1alpha1.SchemeGroupVersion.WithResource("verticalpodautoscalercheckpoints"):
+	case pocautoscalingk8siov1alpha1.SchemeGroupVersion.WithResource("verticalpodautoscalercheckpoints"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Poc().V1alpha1().VerticalPodAutoscalerCheckpoints().Informer()}, nil
 
 	}
