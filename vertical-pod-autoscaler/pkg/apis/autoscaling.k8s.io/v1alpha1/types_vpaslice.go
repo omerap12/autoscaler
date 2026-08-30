@@ -36,7 +36,6 @@ const (
 
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +kubebuilder:storageversion
 // +kubebuilder:resource:shortName=vpaslice
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="VPA",type="string",JSONPath=".spec.vpaName"
@@ -127,7 +126,6 @@ type VerticalPodAutoscalerSliceList struct {
 // +genclient
 // +genclient:noStatus
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +kubebuilder:storageversion
 // +kubebuilder:resource:shortName=vpaslicecheckpoint
 // +kubebuilder:metadata:annotations="api-approved.kubernetes.io=https://github.com/kubernetes/kubernetes/pull/63797"
 
