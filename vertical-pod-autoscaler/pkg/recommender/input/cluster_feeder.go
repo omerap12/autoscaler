@@ -67,6 +67,9 @@ type ClusterStateFeeder interface {
 	// InitFromCheckpoints loads historical checkpoints into clusterState.
 	InitFromCheckpoints(ctx context.Context)
 
+	// InitFromCheckpointSlices loads historical slice checkpoints into clusterState.
+	InitFromCheckpointSlices(ctx context.Context)
+
 	// LoadVPAs updates clusterState with current state of VPAs.
 	LoadVPAs(ctx context.Context)
 
@@ -75,6 +78,9 @@ type ClusterStateFeeder interface {
 
 	// LoadPods updates clusterState with current specification of Pods and their Containers.
 	LoadPods()
+
+	// LoadNodes updates clusterState with the current state of the nodes
+	LoadNodes(ctx context.Context)
 
 	// LoadRealTimeMetrics updates clusterState with current usage metrics of containers.
 	LoadRealTimeMetrics(ctx context.Context)
@@ -228,6 +234,7 @@ type clusterStateFeeder struct {
 	vpaCheckpointSlicesLister vpaslices_lister.VerticalPodAutoscalerSliceCheckpointLister
 	vpaLister                 vpa_lister.VerticalPodAutoscalerLister
 	vpaSlicesLister           vpaslices_lister.VerticalPodAutoscalerSliceLister
+	nodeLister                listersv1.NodeLister
 	clusterState              model.ClusterState
 	selectorFetcher           target.VpaTargetSelectorFetcher
 	memorySaveMode            bool
@@ -246,7 +253,7 @@ func (feeder *clusterStateFeeder) InitFromHistoryProvider(historyProvider histor
 	}
 	for podID, podHistory := range clusterHistory {
 		klog.V(4).InfoS("Adding pod with labels", "pod", podID, "labels", podHistory.LastLabels)
-		feeder.clusterState.AddOrUpdatePod(podID, podHistory.LastLabels, corev1.PodUnknown)
+		feeder.clusterState.AddOrUpdatePod(podID, podHistory.LastLabels, corev1.PodUnknown, "")
 		for containerName, sampleList := range podHistory.Samples {
 			containerID := model.ContainerID{
 				PodID:         podID,
@@ -312,6 +319,57 @@ func (feeder *clusterStateFeeder) InitFromCheckpoints(ctx context.Context) {
 			if err != nil {
 				klog.ErrorS(err, "Error while loading checkpoint")
 			}
+		}
+	}
+}
+
+func (feeder *clusterStateFeeder) setVpaSliceCheckpoint(checkpoint *vpaslices_types.VerticalPodAutoscalerSliceCheckpoint) error {
+	sliceID := model.VpaSliceID{Namespace: checkpoint.Namespace, SliceName: checkpoint.Spec.VPASliceName}
+	slice, exists := feeder.clusterState.VPASlices()[sliceID]
+	if !exists {
+		return fmt.Errorf("cannot load slice checkpoint to missing VPASlice object %s/%s", sliceID.Namespace, sliceID.SliceName)
+	}
+
+	for _, containerCheckpoint := range checkpoint.Status.ContainerCheckpoints {
+		checkpointStatus := &vpa_types.VerticalPodAutoscalerCheckpointStatus{
+			Version:           checkpoint.Status.Version,
+			FirstSampleStart:  containerCheckpoint.FirstSampleStart,
+			LastSampleStart:   containerCheckpoint.LastSampleStart,
+			TotalSamplesCount: containerCheckpoint.TotalSamplesCount,
+			CPUHistogram:      containerCheckpoint.CPUHistogram,
+			MemoryHistogram:   containerCheckpoint.MemoryHistogram,
+		}
+		cs := model.NewAggregateContainerState()
+		if err := cs.LoadFromCheckpoint(checkpointStatus); err != nil {
+			return fmt.Errorf("cannot load checkpoint for VPASlice %s/%s container %s: %v",
+				sliceID.Namespace, sliceID.SliceName, containerCheckpoint.ContainerName, err)
+		}
+		slice.ContainersInitialAggregateState[containerCheckpoint.ContainerName] = cs
+	}
+	return nil
+}
+
+func (feeder *clusterStateFeeder) InitFromCheckpointSlices(ctx context.Context) {
+	klog.V(3).InfoS("Initializing VPA slices from checkpoint slices")
+	feeder.LoadVPASlices(ctx)
+
+	checkpointList, err := feeder.vpaCheckpointSlicesLister.List(labels.Everything())
+	if err != nil {
+		klog.ErrorS(err, "Cannot list VPA slice checkpoints")
+		return
+	}
+	klog.V(3).InfoS("Fetching VPA slice checkpoints", "count", len(checkpointList))
+
+	for _, checkpoint := range checkpointList {
+		if feeder.shouldIgnoreNamespace(checkpoint.Namespace) {
+			klog.V(3).InfoS("Skipping slice checkpoint; namespace ignored",
+				"checkpoint", klog.KObj(checkpoint))
+			continue
+		}
+		klog.V(3).InfoS("Loading slice checkpoint",
+			"checkpoint", klog.KRef(checkpoint.Namespace, checkpoint.Spec.VPASliceName))
+		if err := feeder.setVpaSliceCheckpoint(checkpoint); err != nil {
+			klog.ErrorS(err, "Error while loading slice checkpoint")
 		}
 	}
 }
@@ -415,11 +473,6 @@ func filterVPAs(feeder *clusterStateFeeder, allVpaCRDs []*vpa_types.VerticalPodA
 	return vpaCRDs
 }
 
-func filterVPASlices(feeder *clusterStateFeeder, allVPASlicesCRDs []*vpaslices_types.VerticalPodAutoscalerSlice) []*vpaslices_types.VerticalPodAutoscalerSlice {
-	// TODO: fill this.
-	return nil
-}
-
 // LoadVPAs fetches VPA objects and loads them into the cluster state.
 func (feeder *clusterStateFeeder) LoadVPAs(ctx context.Context) {
 	// List VPA API objects.
@@ -470,21 +523,26 @@ func (feeder *clusterStateFeeder) LoadVPAs(ctx context.Context) {
 }
 
 func (feeder *clusterStateFeeder) LoadVPASlices(ctx context.Context) {
-	// TODO: feel this function
 	allVpaSlicesCRDs, err := feeder.vpaSlicesLister.List(labels.Everything())
 	if err != nil {
 		klog.ErrorS(err, "Cannot list vpaSlices")
 		return
 	}
 
-	// Filter out vpaSlices that specified recommenders with names not equal to "default"
-	vpaSlicesCRDs := filterVPASlices(feeder, allVpaSlicesCRDs)
-
-	klog.V(3).InfoS("Fetching VPASlices", "count", len(vpaSlicesCRDs))
-	// Add or update existing VPAs in the model.
+	// Build a set of VPA names already accepted by filterVPAs and loaded into the cluster state.
+	activeVPAs := make(map[model.VpaID]bool)
+	for vpaID := range feeder.clusterState.VPAs() {
+		activeVPAs[vpaID] = true
+	}
 
 	sliceKeys := make(map[model.VpaSliceID]bool)
-	for _, sliceCRD := range vpaSlicesCRDs {
+	for _, sliceCRD := range allVpaSlicesCRDs {
+		parentID := model.VpaID{Namespace: sliceCRD.Namespace, VpaName: sliceCRD.Spec.VPAName}
+		if !activeVPAs[parentID] {
+			klog.V(6).InfoS("Ignoring vpaSliceCRD because parent VPA is not active", "vpaSlice", klog.KObj(sliceCRD), "vpaName", sliceCRD.Spec.VPAName)
+			continue
+		}
+
 		sliceID := model.VpaSliceID{
 			Namespace: sliceCRD.Namespace,
 			SliceName: sliceCRD.Name,
@@ -493,6 +551,8 @@ func (feeder *clusterStateFeeder) LoadVPASlices(ctx context.Context) {
 			sliceKeys[sliceID] = true
 		}
 	}
+	klog.V(3).InfoS("Fetched VPASlices", "count", len(sliceKeys))
+
 	// Delete non-existent VPASlices from the model.
 	for sliceID := range feeder.clusterState.VPASlices() {
 		if _, exists := sliceKeys[sliceID]; !exists {
@@ -502,7 +562,6 @@ func (feeder *clusterStateFeeder) LoadVPASlices(ctx context.Context) {
 			}
 		}
 	}
-
 }
 
 // LoadPods loads pod into the cluster state.
@@ -528,7 +587,7 @@ func (feeder *clusterStateFeeder) LoadPods() {
 		if feeder.memorySaveMode && !feeder.matchesVPA(pod) {
 			continue
 		}
-		feeder.clusterState.AddOrUpdatePod(pod.ID, pod.PodLabels, pod.Phase)
+		feeder.clusterState.AddOrUpdatePod(pod.ID, pod.PodLabels, pod.Phase, pod.NodeName)
 		for _, container := range pod.Containers {
 			if err = feeder.clusterState.AddOrUpdateContainer(container.ID, container.Request); err != nil {
 				klog.V(0).InfoS("Failed to add container", "container", container.ID, "error", err)
@@ -541,6 +600,19 @@ func (feeder *clusterStateFeeder) LoadPods() {
 		if err = feeder.clusterState.SetInitContainers(pod.ID, initContainerNames); err != nil {
 			klog.V(0).InfoS("Failed to set init containers", "pod", klog.KRef(pod.ID.Namespace, pod.ID.PodName), "error", err)
 		}
+	}
+}
+
+// THIS HAS TO RUN BEFORE LOAD PODS
+// TODO: we don't need to list all nodes - just the nodes which have the checkpoint slice attached to them.
+func (feeder *clusterStateFeeder) LoadNodes(ctx context.Context) {
+	nodes, err := feeder.nodeLister.List(labels.Everything())
+	if err != nil {
+		klog.ErrorS(err, "error list nodes")
+		return
+	}
+	for _, node := range nodes {
+		feeder.clusterState.AddOrUpdateNode(node.Name, node.Labels)
 	}
 }
 

@@ -75,9 +75,9 @@ func addTestMemorySample(cluster ClusterState, container ContainerID, memoryByte
 // with the same name ('app-A') together.
 func TestAggregateStateByContainerName(t *testing.T) {
 	cluster := NewClusterState(testGcPeriod)
-	cluster.AddOrUpdatePod(testPodID1, testLabels, corev1.PodRunning)
+	cluster.AddOrUpdatePod(testPodID1, testLabels, corev1.PodRunning, "")
 	otherLabels := labels.Set{"label-2": "value-2"}
-	cluster.AddOrUpdatePod(testPodID2, otherLabels, corev1.PodRunning)
+	cluster.AddOrUpdatePod(testPodID2, otherLabels, corev1.PodRunning, "")
 
 	// Create 4 containers: 2 with the same name and 2 with different names.
 	containers := []ContainerID{

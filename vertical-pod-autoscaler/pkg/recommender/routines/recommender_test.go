@@ -347,3 +347,7 @@ func (k mockAggregateStateKey) Labels() labels.Labels {
 	labels, _ := labels.ConvertSelectorToLabelsMap(k.labels)
 	return labels
 }
+
+func (k mockAggregateStateKey) NodeLabelValue() string {
+	return ""
+}

@@ -78,7 +78,7 @@ func addVpa(t *testing.T, cluster model.ClusterState, vpaID model.VpaID, selecto
 
 func TestMergeContainerStateForCheckpointDropsRecentMemoryPeak(t *testing.T) {
 	cluster := model.NewClusterState(testGcPeriod)
-	cluster.AddOrUpdatePod(testPodID1, testLabels, corev1.PodRunning)
+	cluster.AddOrUpdatePod(testPodID1, testLabels, corev1.PodRunning, "")
 	assert.NoError(t, cluster.AddOrUpdateContainer(testContainerID1, testRequest))
 	container := cluster.GetContainer(testContainerID1)
 
@@ -214,7 +214,7 @@ func TestStoreCheckpointsMakesProgressEvenForCancelledContext(t *testing.T) {
 			PodName:   fmt.Sprintf("pod-%d", i),
 		}
 		podLabels := map[string]string{"app": fmt.Sprintf("pod-%d", i)}
-		clusterState.AddOrUpdatePod(podID, podLabels, corev1.PodRunning)
+		clusterState.AddOrUpdatePod(podID, podLabels, corev1.PodRunning, "")
 		for j := range 2 {
 			containerID := model.ContainerID{
 				PodID:         podID,

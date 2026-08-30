@@ -18,13 +18,19 @@ package routines
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
 	vpaautoscalingv1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
 	vpa_api "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/typed/autoscaling.k8s.io/v1"
+	vpa_slice_api "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/typed/autoscaling.k8s.io/v1alpha1"
+	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/features"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/checkpoint"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/logic"
@@ -54,11 +60,13 @@ type recommender struct {
 	clusterState                  model.ClusterState
 	clusterStateFeeder            input.ClusterStateFeeder
 	checkpointWriter              checkpoint.CheckpointWriter
+	checkpointSliceWriter         checkpoint.CheckpointSliceWriter
 	checkpointsGCInterval         time.Duration
 	checkpointsWriteTimeout       time.Duration
 	controllerFetcher             controllerfetcher.ControllerFetcher
 	lastCheckpointGC              time.Time
 	vpaClient                     vpa_api.VerticalPodAutoscalersGetter
+	vpaSliceClient                vpa_slice_api.VerticalPodAutoscalerSlicesGetter
 	podResourceRecommender        logic.PodResourceRecommender
 	recommendationFormat          logic.RecommendationFormat
 	useCheckpoints                bool
@@ -151,8 +159,94 @@ func (r *recommender) UpdateVPAs() {
 	wg.Wait()
 }
 
+type slicePatchRecord struct {
+	Op    string `json:"op,inline"`
+	Path  string `json:"path,inline"`
+	Value any    `json:"value"`
+}
+
+func processVPASliceUpdate(r *recommender, slice *model.VpaSlice, parentVpa *model.Vpa) {
+	oldStatus := slice.AsSliceStatus()
+
+	containerNameToAggregateStateMap := slice.AggregateStateByContainerName()
+	filteredMap := make(model.ContainerNameToAggregateStateMap)
+	for containerName, aggregatedState := range containerNameToAggregateStateMap {
+		containerResourcePolicy := vpa_utils.GetContainerResourcePolicy(containerName, parentVpa.ResourcePolicy)
+		autoscalingDisabled := containerResourcePolicy != nil && containerResourcePolicy.Mode != nil &&
+			*containerResourcePolicy.Mode == vpaautoscalingv1.ContainerScalingModeOff
+		if !autoscalingDisabled {
+			aggregatedState.UpdateFromPolicy(containerResourcePolicy)
+			filteredMap[containerName] = aggregatedState
+		}
+	}
+
+	resources := r.podResourceRecommender.GetRecommendedPodResources(filteredMap)
+	had := slice.HasRecommendation()
+
+	recommendation := logic.MapToListOfRecommendedContainerResources(resources, r.recommendationFormat)
+	slice.SetRecommendation(recommendation)
+
+	if slice.HasRecommendation() && !had {
+		metrics_recommender.ObserveRecommendationLatency(slice.Created)
+	}
+
+	hasMatchingAggregations := len(containerNameToAggregateStateMap) > 0
+	slice.UpdateConditions(hasMatchingAggregations)
+
+	newStatus := slice.AsSliceStatus()
+	if !apiequality.Semantic.DeepEqual(*oldStatus, *newStatus) {
+		patches := []slicePatchRecord{{
+			Op:    "add",
+			Path:  "/status",
+			Value: *newStatus,
+		}}
+		bytes, err := json.Marshal(patches)
+		if err != nil {
+			klog.ErrorS(err, "Cannot marshal VPASlice status patch",
+				"vpaSlice", klog.KRef(slice.ID.Namespace, slice.ID.SliceName))
+			return
+		}
+		_, err = r.vpaSliceClient.VerticalPodAutoscalerSlices(slice.ID.Namespace).Patch(
+			context.TODO(), slice.ID.SliceName, types.JSONPatchType, bytes, metav1.PatchOptions{}, "status")
+		if err != nil {
+			klog.ErrorS(err, "Cannot update VPASlice status",
+				"vpaSlice", klog.KRef(slice.ID.Namespace, slice.ID.SliceName))
+		}
+	}
+}
+
 func (r *recommender) UpdateVPASlices() {
-	// TODO: fill this
+	type sliceUpdate struct {
+		slice     *model.VpaSlice
+		parentVpa *model.Vpa
+	}
+
+	slices := r.clusterState.VPASlices()
+	updates := make(chan sliceUpdate, len(slices))
+
+	var wg sync.WaitGroup
+	for i := 0; i < r.updateWorkerCount; i++ {
+		wg.Go(func() {
+			for su := range updates {
+				processVPASliceUpdate(r, su.slice, su.parentVpa)
+			}
+		})
+	}
+
+	for _, slice := range slices {
+		parentVpaID := model.VpaID{Namespace: slice.ID.Namespace, VpaName: slice.VPAName}
+		parentVpa, found := r.clusterState.VPAs()[parentVpaID]
+		if !found {
+			klog.V(4).InfoS("Skipping VPASlice update, parent VPA not found",
+				"vpaSlice", klog.KRef(slice.ID.Namespace, slice.ID.SliceName),
+				"vpa", klog.KRef(parentVpaID.Namespace, parentVpaID.VpaName))
+			continue
+		}
+		updates <- sliceUpdate{slice: slice, parentVpa: parentVpa}
+	}
+
+	close(updates)
+	wg.Wait()
 }
 
 func (r *recommender) MaintainCheckpoints(ctx context.Context) {
@@ -167,7 +261,9 @@ func (r *recommender) MaintainCheckpoints(ctx context.Context) {
 }
 
 func (r *recommender) MaintainCheckpointSlices(ctx context.Context) {
-	// TODO: fill this function
+	if r.useCheckpoints {
+		r.checkpointSliceWriter.StoreCheckpointSlices(ctx, r.updateWorkerCount)
+	}
 }
 
 func (r *recommender) RunOnce() {
@@ -181,8 +277,13 @@ func (r *recommender) RunOnce() {
 	r.clusterStateFeeder.LoadVPAs(ctx)
 	timer.ObserveStep("LoadVPAs")
 
-	r.clusterStateFeeder.LoadVPASlices(ctx)
-	timer.ObserveStep("LoadVPASlices")
+	// TODO: switch to variable
+	if features.Enabled(features.VPASlices) {
+		r.clusterStateFeeder.LoadVPASlices(ctx)
+		timer.ObserveStep("LoadVPASlices")
+		r.clusterStateFeeder.LoadNodes(ctx)
+		timer.ObserveStep("LoadNodes")
+	}
 
 	r.clusterStateFeeder.LoadPods()
 	timer.ObserveStep("LoadPods")
@@ -198,16 +299,20 @@ func (r *recommender) RunOnce() {
 	r.UpdateVPAs()
 	timer.ObserveStep("UpdateVPAs")
 
-	r.UpdateVPASlices()
-	timer.ObserveStep("UpdateVPASlices")
+	if features.Enabled(features.VPASlices) {
+		r.UpdateVPASlices()
+		timer.ObserveStep("UpdateVPASlices")
+	}
 
 	stepCtx, cancelFunc := context.WithDeadline(ctx, time.Now().Add(r.checkpointsWriteTimeout))
 	defer cancelFunc()
 	r.MaintainCheckpoints(stepCtx)
 	timer.ObserveStep("MaintainCheckpoints")
 
-	r.MaintainCheckpointSlices(stepCtx)
-	timer.ObserveStep("MaintainCheckpointSlices")
+	if features.Enabled(features.VPASlices) {
+		r.MaintainCheckpointSlices(stepCtx)
+		timer.ObserveStep("MaintainCheckpointSlices")
+	}
 
 	r.clusterState.RateLimitedGarbageCollectAggregateCollectionStates(ctx, time.Now(), r.controllerFetcher)
 	timer.ObserveStep("GarbageCollect")
@@ -218,12 +323,14 @@ func (r *recommender) RunOnce() {
 type RecommenderFactory struct {
 	ClusterState model.ClusterState
 
-	ClusterStateFeeder     input.ClusterStateFeeder
-	ControllerFetcher      controllerfetcher.ControllerFetcher
-	CheckpointWriter       checkpoint.CheckpointWriter
-	PodResourceRecommender logic.PodResourceRecommender
-	RecommendationFormat   logic.RecommendationFormat
-	VpaClient              vpa_api.VerticalPodAutoscalersGetter
+	ClusterStateFeeder      input.ClusterStateFeeder
+	ControllerFetcher       controllerfetcher.ControllerFetcher
+	CheckpointWriter        checkpoint.CheckpointWriter
+	CheckpointSliceWriter   checkpoint.CheckpointSliceWriter
+	PodResourceRecommender  logic.PodResourceRecommender
+	RecommendationFormat    logic.RecommendationFormat
+	VpaClient               vpa_api.VerticalPodAutoscalersGetter
+	VpaSliceClient          vpa_slice_api.VerticalPodAutoscalerSlicesGetter
 
 	RecommendationPostProcessors []RecommendationPostProcessor
 
@@ -240,11 +347,13 @@ func (c RecommenderFactory) Make() Recommender {
 		clusterState:                  c.ClusterState,
 		clusterStateFeeder:            c.ClusterStateFeeder,
 		checkpointWriter:              c.CheckpointWriter,
+		checkpointSliceWriter:         c.CheckpointSliceWriter,
 		checkpointsGCInterval:         c.CheckpointsGCInterval,
 		checkpointsWriteTimeout:       c.CheckpointsWriteTimeout,
 		controllerFetcher:             c.ControllerFetcher,
 		useCheckpoints:                c.UseCheckpoints,
 		vpaClient:                     c.VpaClient,
+		vpaSliceClient:                c.VpaSliceClient,
 		podResourceRecommender:        c.PodResourceRecommender,
 		recommendationFormat:          c.RecommendationFormat,
 		recommendationPostProcessor:   c.RecommendationPostProcessors,

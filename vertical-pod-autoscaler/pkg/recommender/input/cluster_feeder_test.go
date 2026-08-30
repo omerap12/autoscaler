@@ -106,7 +106,7 @@ func (cs *fakeClusterState) AddSample(sample *model.ContainerUsageSampleWithKey)
 	return nil
 }
 
-func (cs *fakeClusterState) AddOrUpdatePod(podID model.PodID, _ labels.Set, _ corev1.PodPhase) {
+func (cs *fakeClusterState) AddOrUpdatePod(podID model.PodID, _ labels.Set, _ corev1.PodPhase, _ string) {
 	cs.addedPods = append(cs.addedPods, podID)
 	if cs.stubbedPods == nil {
 		cs.stubbedPods = make(map[model.PodID]*model.PodState)

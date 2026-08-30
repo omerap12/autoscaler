@@ -178,6 +178,9 @@ type Vpa struct {
 	// Labels selector that determines which Pods are controlled by this VPA
 	// object. Can be nil, in which case no Pod is matched.
 	PodSelector labels.Selector
+	// SliceByNodeLabel is the node label key used to split recommendations
+	// into per-node-group VPASlices. Nil for non-sliced VPAs.
+	SliceByNodeLabel *string
 	// Map of the object annotations (key-value pairs).
 	Annotations vpaAnnotationsMap
 	// conditions is the map of status conditions (keys are condition types).

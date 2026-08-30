@@ -61,6 +61,9 @@ const (
 	// InPlace enables the InPlace update mode to be used.
 	// Requires KEP-1287 InPlacePodVerticalScaling feature-gate to be enabled on the cluster.
 	InPlace featuregate.Feature = "InPlace"
+
+	// TODO: fill this
+	VPASlices featuregate.Feature = "VPASlice"
 )
 
 // MutableFeatureGate is a mutable, versioned, global FeatureGate.

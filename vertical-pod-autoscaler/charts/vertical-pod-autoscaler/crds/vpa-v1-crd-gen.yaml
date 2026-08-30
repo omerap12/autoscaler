@@ -472,6 +472,20 @@ spec:
                       type: object
                     type: array
                 type: object
+              sliceByNodeLabel:
+                description: |-
+                  SliceByNodeLabel enables per-node-group recommendations for workloads
+                  (typically DaemonSets) running across heterogeneous nodes. When set,
+                  the recommender creates a VerticalPodAutoscalerSlice object for each
+                  distinct value of this node label, containing independent recommendations
+                  computed from pods on nodes with that label value.
+
+                  For example, setting this to "node.kubernetes.io/instance-type" produces
+                  separate recommendations for pods on m5.xlarge nodes vs c5.2xlarge nodes.
+
+                  When set, the VPA's own status.recommendation is left empty — consumers
+                  should read recommendations from the associated VPASlice objects instead.
+                type: string
               startupBoost:
                 description: startupBoost specifies the startup boost policy for the
                   pod.

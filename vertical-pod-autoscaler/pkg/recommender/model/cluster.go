@@ -45,7 +45,8 @@ const (
 // All input to the VPA Recommender algorithm lives in this structure.
 type ClusterState interface {
 	StateMapSize() int
-	AddOrUpdatePod(podID PodID, newLabels labels.Set, phase corev1.PodPhase)
+	AddOrUpdatePod(podID PodID, newLabels labels.Set, phase corev1.PodPhase, nodeName string)
+	AddOrUpdateNode(nodeName string, nodeLabels map[string]string)
 	SetInitContainers(podID PodID, initContainers []string) error
 	GetContainer(containerID ContainerID) *ContainerState
 	DeletePod(podID PodID)
@@ -56,6 +57,7 @@ type ClusterState interface {
 	AddOrUpdateVpaSlice(apiObject *vpaslices_types.VerticalPodAutoscalerSlice) error
 	DeleteVpa(vpaID VpaID) error
 	DeleteVpaSlice(vpaSliceID VpaSliceID) error
+	DeleteNode(nodeName string)
 	MakeAggregateStateKey(pod *PodState, containerName string) AggregateStateKey
 	RateLimitedGarbageCollectAggregateCollectionStates(ctx context.Context, now time.Time, controllerFetcher controllerfetcher.ControllerFetcher)
 	RecordRecommendation(vpa *Vpa, now time.Time) error
@@ -72,6 +74,9 @@ type ClusterState interface {
 type clusterState struct {
 	// Pods in the cluster.
 	pods map[PodID]*PodState
+	// Node labels in the cluster, keyed by node name.
+	// Used to resolve the slice label value for a pod's node.
+	nodeLabels map[string]map[string]string
 	// VPA objects in the cluster.
 	vpas map[VpaID]*Vpa
 	// VPA objects in the cluster that have no recommendation mapped to the first
@@ -83,7 +88,9 @@ type clusterState struct {
 	observedVPAs []*vpa_types.VerticalPodAutoscaler
 
 	// VPASlice objects in the cluster.
-	vpaSlices map[VpaSliceID]*VpaSlice
+	vpaSlices         map[VpaSliceID]*VpaSlice
+	emptyVPASlices    map[VpaSliceID]time.Time
+	observedVPASlices []*vpaslices_types.VerticalPodAutoscalerSlice
 
 	// All container aggregations where the usage samples are stored.
 	aggregateStateMap aggregateContainerStatesMap
@@ -109,6 +116,7 @@ type AggregateStateKey interface {
 	Namespace() string
 	ContainerName() string
 	Labels() labels.Labels
+	NodeLabelValue() string
 }
 
 // String representation of the labels.LabelSet. This is the value returned by
@@ -133,6 +141,8 @@ type PodState struct {
 	InitContainers []string
 	// PodPhase describing current life cycle phase of the Pod.
 	Phase corev1.PodPhase
+	// NodeName is the name of the node the Pod is scheduled on.
+	NodeName string
 }
 
 // NewClusterState returns a new clusterState with no pods.
@@ -146,6 +156,7 @@ func NewClusterState(gcInterval time.Duration) *clusterState {
 		labelSetMap:                   make(labelSetMap),
 		lastAggregateContainerStateGC: time.Unix(0, 0),
 		gcInterval:                    gcInterval,
+		nodeLabels:                    make(map[string]map[string]string),
 	}
 }
 
@@ -161,7 +172,7 @@ type ContainerUsageSampleWithKey struct {
 // the Cluster object.
 // If the labels of the pod have changed, it updates the links between the containers
 // and the aggregations.
-func (cluster *clusterState) AddOrUpdatePod(podID PodID, newLabels labels.Set, phase corev1.PodPhase) {
+func (cluster *clusterState) AddOrUpdatePod(podID PodID, newLabels labels.Set, phase corev1.PodPhase, nodeName string) {
 	pod, podExists := cluster.pods[podID]
 	if !podExists {
 		pod = newPod(podID)
@@ -184,6 +195,15 @@ func (cluster *clusterState) AddOrUpdatePod(podID PodID, newLabels labels.Set, p
 		cluster.addPodToItsVpa(pod)
 	}
 	pod.Phase = phase
+	pod.NodeName = nodeName
+}
+
+func (cluster *clusterState) AddOrUpdateNode(nodeName string, nodeLabels map[string]string) {
+	cluster.nodeLabels[nodeName] = nodeLabels
+}
+
+func (cluster *clusterState) DeleteNode(nodeName string) {
+	delete(cluster.nodeLabels, nodeName)
 }
 
 // SetInitContainers sets the names of init containers that belong to the pod.
@@ -203,7 +223,7 @@ func (cluster *clusterState) SetInitContainers(podID PodID, initContainers []str
 func (cluster *clusterState) addPodToItsVpa(pod *PodState) {
 	for _, vpa := range cluster.vpas {
 		if vpa_utils.PodLabelsMatchVPA(pod.ID.Namespace, cluster.labelSetMap[pod.labelSetKey], vpa.ID.Namespace, vpa.PodSelector) {
-
+			vpa.PodCount++
 		}
 	}
 }
@@ -334,6 +354,7 @@ func (cluster *clusterState) AddOrUpdateVpa(apiObject *vpa_types.VerticalPodAuto
 	vpa.SetResourcePolicy(apiObject.Spec.ResourcePolicy)
 	vpa.SetAPIVersion(apiObject.GetObjectKind().GroupVersionKind().Version)
 	vpa.Generation = apiObject.Generation
+	vpa.SliceByNodeLabel = apiObject.Spec.SliceByNodeLabel
 	return nil
 }
 
@@ -430,12 +451,19 @@ func (cluster *clusterState) getLabelSetKey(labelSet labels.Set) labelSetKey {
 // MakeAggregateStateKey returns the AggregateStateKey that should be used
 // to aggregate usage samples from a container with the given name in a given pod.
 func (cluster *clusterState) MakeAggregateStateKey(pod *PodState, containerName string) AggregateStateKey {
-	return aggregateStateKey{
+	key := aggregateStateKey{
 		namespace:     pod.ID.Namespace,
 		containerName: containerName,
 		labelSetKey:   pod.labelSetKey,
 		labelSetMap:   &cluster.labelSetMap,
 	}
+
+	vpa := cluster.GetControllingVPA(pod)
+	if vpa != nil && vpa.SliceByNodeLabel != nil {
+		key.nodeLabelValue = cluster.getNodeLabelValue(pod.NodeName, *vpa.SliceByNodeLabel)
+	}
+
+	return key
 }
 
 // aggregateStateKeyForContainerID returns the AggregateStateKey for the ContainerID.
@@ -460,6 +488,12 @@ func (cluster *clusterState) findOrCreateAggregateContainerState(containerID Con
 		// Link the new aggregation to the existing VPAs.
 		for _, vpa := range cluster.vpas {
 			vpa.UseAggregationIfMatching(aggregateStateKey, aggregateContainerState)
+		}
+		// If this aggregation is node-aware, also link to matching VPASlices.
+		if aggregateStateKey.NodeLabelValue() != "" {
+			for _, slice := range cluster.vpaSlices {
+				slice.UseAggregationIfMatching(aggregateStateKey, aggregateContainerState)
+			}
 		}
 	}
 	return aggregateContainerState
@@ -494,6 +528,9 @@ func (cluster *clusterState) garbageCollectAggregateCollectionStates(ctx context
 		delete(cluster.aggregateStateMap, key)
 		for _, vpa := range cluster.vpas {
 			vpa.DeleteAggregation(key)
+		}
+		for _, slice := range cluster.vpaSlices {
+			slice.DeleteAggregation(key)
 		}
 	}
 }
@@ -600,6 +637,14 @@ func (cluster *clusterState) GetControllingVPA(pod *PodState) *Vpa {
 	return nil
 }
 
+func (cluster *clusterState) getNodeLabelValue(nodeName string, nodeLabelKey string) string {
+	if nodeLabels, ok := cluster.nodeLabels[nodeName]; ok {
+		return nodeLabels[nodeLabelKey]
+	}
+	// TODO: make this better
+	return ""
+}
+
 // Implementation of the AggregateStateKey interface. It can be used as a map key.
 type aggregateStateKey struct {
 	namespace     string
@@ -608,6 +653,8 @@ type aggregateStateKey struct {
 	// Pointer to the global map from labelSetKey to labels.Set.
 	// Note: a pointer is used so that two copies of the same key are equal.
 	labelSetMap *labelSetMap
+	// nodeLabelValue is the value of the node label used to split aggregations by node topology.
+	nodeLabelValue string
 }
 
 // Namespace returns the namespace for the aggregateStateKey.
@@ -618,6 +665,10 @@ func (k aggregateStateKey) Namespace() string {
 // ContainerName returns the name of the container for the aggregateStateKey.
 func (k aggregateStateKey) ContainerName() string {
 	return k.containerName
+}
+
+func (k aggregateStateKey) NodeLabelValue() string {
+	return k.nodeLabelValue
 }
 
 // Labels returns the set of labels for the aggregateStateKey.

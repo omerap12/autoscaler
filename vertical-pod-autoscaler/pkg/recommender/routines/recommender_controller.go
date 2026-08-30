@@ -32,6 +32,7 @@ import (
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/checkpoint"
 	recommender_config "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/config"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input"
+	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/features"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/history"
 	input_metrics "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/metrics"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/logic"
@@ -139,8 +140,10 @@ func NewRecommenderController(
 		ClusterState:       clusterState,
 		ClusterStateFeeder: clusterStateFeeder,
 		ControllerFetcher:  controllerFetcher,
-		CheckpointWriter:   checkpoint.NewCheckpointWriter(clusterState, vpaClient.AutoscalingV1()),
-		VpaClient:          vpaClient.AutoscalingV1(),
+		CheckpointWriter:      checkpoint.NewCheckpointWriter(clusterState, vpaClient.AutoscalingV1()),
+		CheckpointSliceWriter: checkpoint.NewCheckpointSliceWriter(clusterState, vpaClient.AutoscalingV1alpha1()),
+		VpaClient:             vpaClient.AutoscalingV1(),
+		VpaSliceClient:        vpaClient.AutoscalingV1alpha1(),
 		PodResourceRecommender: logic.CreatePodResourceRecommender(logic.RecommendationConfig{
 			SafetyMarginFraction:       config.SafetyMarginFraction,
 			PodMinCPUMillicores:        config.PodMinCPUMillicores,
@@ -211,6 +214,9 @@ func initHistoryProvider(ctx context.Context, rec Recommender, config *recommend
 	useCheckpoints := config.Storage != "prometheus"
 	if useCheckpoints {
 		rec.GetClusterStateFeeder().InitFromCheckpoints(ctx)
+		if features.Enabled(features.VPASlices) {
+			rec.GetClusterStateFeeder().InitFromCheckpointSlices(ctx)
+		}
 	} else {
 		histConfig, err := newPrometheusHistoryProviderConfig(config)
 		if err != nil {
