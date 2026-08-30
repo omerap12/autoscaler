@@ -34,9 +34,11 @@ import (
 	"k8s.io/klog/v2"
 
 	vpa_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
+	vpaslices_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1alpha1"
 	vpa_clientset "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned"
 	vpa_api "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/typed/autoscaling.k8s.io/v1"
 	vpa_lister "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/listers/autoscaling.k8s.io/v1"
+	vpaslices_lister "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/listers/autoscaling.k8s.io/v1alpha1"
 	controllerfetcher "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/target/controller_fetcher"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/annotations"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/client"
@@ -170,6 +172,68 @@ func NewVpaCheckpointLister(vpaClient *vpa_clientset.Clientset, stopChannel <-ch
 		klog.InfoS("Initial VPA checkpoint synced successfully")
 	}
 	return vpaCheckpointLister
+}
+
+// NewVpaSlicesLister returns VerticalPodAutoscalerSliceLister configured to fetch all VPASlice objects from namespace,
+// set namespace to k8sapiv1.NamespaceAll to select all namespaces.
+// The method blocks until vpaSlicesLister is initially populated.
+func NewVpaSlicesLister(vpaClient *vpa_clientset.Clientset, stopChannel <-chan struct{}, namespace string) vpaslices_lister.VerticalPodAutoscalerSliceLister {
+	vpaSlicesListWatch := cache.NewListWatchFromClient(vpaClient.AutoscalingV1alpha1().RESTClient(), "verticalpodautoscalerslices", namespace, fields.Everything())
+	informerOptions := cache.InformerOptions{
+		ObjectType:    &vpaslices_types.VerticalPodAutoscalerSlice{},
+		ListerWatcher: vpaSlicesListWatch,
+		Handler:       &cache.ResourceEventHandlerFuncs{},
+		ResyncPeriod:  1 * time.Hour,
+		Indexers:      cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+		Transform:     client.StripManagedFields,
+	}
+
+	store, controller := cache.NewInformerWithOptions(informerOptions)
+	indexer, ok := store.(cache.Indexer)
+	if !ok {
+		klog.ErrorS(nil, "Expected Indexer, but got a Store that does not implement Indexer")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+	}
+	vpaSlicesLister := vpaslices_lister.NewVerticalPodAutoscalerSliceLister(indexer)
+	go controller.Run(stopChannel)
+	if !cache.WaitForCacheSync(stopChannel, controller.HasSynced) {
+		klog.ErrorS(nil, "Failed to sync VPA slices cache during initialization")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+	} else {
+		klog.InfoS("Initial VPA slices synced successfully")
+	}
+	return vpaSlicesLister
+}
+
+// NewVpaSliceCheckpointLister returns VerticalPodAutoscalerSliceCheckpointLister configured to fetch all VPASliceCheckpoint objects from namespace,
+// set namespace to k8sapiv1.NamespaceAll to select all namespaces.
+// The method blocks until vpaSliceCheckpointLister is initially populated.
+func NewVpaSliceCheckpointLister(vpaClient *vpa_clientset.Clientset, stopChannel <-chan struct{}, namespace string) vpaslices_lister.VerticalPodAutoscalerSliceCheckpointLister {
+	vpaSliceCheckpointListWatch := cache.NewListWatchFromClient(vpaClient.AutoscalingV1alpha1().RESTClient(), "verticalpodautoscalerslicecheckpoints", namespace, fields.Everything())
+	informerOptions := cache.InformerOptions{
+		ObjectType:    &vpaslices_types.VerticalPodAutoscalerSliceCheckpoint{},
+		ListerWatcher: vpaSliceCheckpointListWatch,
+		Handler:       &cache.ResourceEventHandlerFuncs{},
+		ResyncPeriod:  1 * time.Hour,
+		Indexers:      cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+		Transform:     client.StripManagedFields,
+	}
+
+	store, controller := cache.NewInformerWithOptions(informerOptions)
+	indexer, ok := store.(cache.Indexer)
+	if !ok {
+		klog.ErrorS(nil, "Expected Indexer, but got a Store that does not implement Indexer")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+	}
+	vpaSliceCheckpointLister := vpaslices_lister.NewVerticalPodAutoscalerSliceCheckpointLister(indexer)
+	go controller.Run(stopChannel)
+	if !cache.WaitForCacheSync(stopChannel, controller.HasSynced) {
+		klog.ErrorS(nil, "Failed to sync VPA slice checkpoint cache during initialization")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+	} else {
+		klog.InfoS("Initial VPA slice checkpoint synced successfully")
+	}
+	return vpaSliceCheckpointLister
 }
 
 // PodMatchesVPA returns true iff the vpaWithSelector matches the Pod.

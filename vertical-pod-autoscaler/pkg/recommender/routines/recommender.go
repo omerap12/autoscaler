@@ -147,8 +147,12 @@ func (r *recommender) UpdateVPAs() {
 		})
 	}
 
-	// Send VPA updates to the workers
+	// Send VPA updates to the workers, skipping VPAs that use sliceByNodeLabel
+	// (their recommendations are written to VPASlice objects instead).
 	for _, observedVpa := range r.clusterState.ObservedVPAs() {
+		if observedVpa.Spec.SliceByNodeLabel != nil {
+			continue
+		}
 		vpaUpdates <- observedVpa
 	}
 

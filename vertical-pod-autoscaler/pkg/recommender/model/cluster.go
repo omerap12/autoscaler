@@ -411,6 +411,9 @@ func (cluster *clusterState) AddOrUpdateVpaSlice(apiObject *vpaslices_types.Vert
 	}
 	slice.VPAName = apiObject.Spec.VPAName
 	slice.NodeSelector = apiObject.Spec.NodeSelector
+	for aggregationKey, aggregation := range cluster.aggregateStateMap {
+		slice.UseAggregationIfMatching(aggregationKey, aggregation)
+	}
 	slice.conditions = conditionsMap
 	if conditionsMap[vpa_types.RecommendationProvided].Status == corev1.ConditionTrue {
 		slice.recommendation = apiObject.Status.Recommendation

@@ -119,7 +119,7 @@ func NewRecommenderController(
 
 	ignoredNamespaces := strings.Split(commonFlags.IgnoredVpaObjectNamespaces, ",")
 
-	clusterStateFeeder := input.ClusterStateFeederFactory{
+	feederFactory := input.ClusterStateFeederFactory{
 		PodLister:           podLister,
 		OOMObserver:         oomObserver,
 		MetricsClient:       input_metrics.NewMetricsClient(source, commonFlags.VpaObjectNamespace, "default-metrics-client"),
@@ -133,7 +133,15 @@ func NewRecommenderController(
 		RecommenderName:     config.RecommenderName,
 		IgnoredNamespaces:   ignoredNamespaces,
 		VpaObjectNamespace:  commonFlags.VpaObjectNamespace,
-	}.Make()
+	}
+	if features.Enabled(features.VPASlices) {
+		feederFactory.VpaCheckpointSlicesClient = vpaClient.AutoscalingV1alpha1()
+		feederFactory.VpaSlicesClient = vpaClient.AutoscalingV1alpha1()
+		feederFactory.VpaSlicesLister = vpa_api_util.NewVpaSlicesLister(vpaClient, stopCh, commonFlags.VpaObjectNamespace)
+		feederFactory.VpaCheckpointSlicesLister = vpa_api_util.NewVpaSliceCheckpointLister(vpaClient, stopCh, commonFlags.VpaObjectNamespace)
+		feederFactory.NodeLister = factory.Core().V1().Nodes().Lister()
+	}
+	clusterStateFeeder := feederFactory.Make()
 	controllerFetcher.Start(ctx, scaleCacheLoopPeriod)
 
 	recommender := RecommenderFactory{

@@ -64,6 +64,9 @@ func getVpasToCheckpoint(clusterVpas map[model.VpaID]*model.Vpa) []*model.Vpa {
 			klog.V(3).InfoS("VPA is loading history, skipping checkpoints", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName))
 			continue
 		}
+		if vpa.SliceByNodeLabel != nil {
+			continue
+		}
 		vpas = append(vpas, vpa)
 	}
 	slices.SortFunc(vpas, func(a, b *model.Vpa) int {

@@ -19,7 +19,9 @@ package input
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -94,39 +96,49 @@ type ClusterStateFeeder interface {
 
 // ClusterStateFeederFactory makes instances of ClusterStateFeeder.
 type ClusterStateFeederFactory struct {
-	ClusterState        model.ClusterState
-	MetricsClient       metrics.MetricsClient
-	VpaCheckpointClient vpa_api.VerticalPodAutoscalerCheckpointsGetter
-	VpaCheckpointLister vpa_lister.VerticalPodAutoscalerCheckpointLister
-	VpaLister           vpa_lister.VerticalPodAutoscalerLister
-	PodLister           listersv1.PodLister
-	OOMObserver         oom.Observer
-	SelectorFetcher     target.VpaTargetSelectorFetcher
-	MemorySaveMode      bool
-	ControllerFetcher   controllerfetcher.ControllerFetcher
-	RecommenderName     string
-	IgnoredNamespaces   []string
-	VpaObjectNamespace  string
-	podsToDelete        []model.PodID
+	ClusterState                model.ClusterState
+	MetricsClient               metrics.MetricsClient
+	VpaCheckpointClient         vpa_api.VerticalPodAutoscalerCheckpointsGetter
+	VpaCheckpointSlicesClient   vpaslices_api.VerticalPodAutoscalerSliceCheckpointsGetter
+	VpaSlicesClient             vpaslices_api.VerticalPodAutoscalerSlicesGetter
+	VpaCheckpointLister         vpa_lister.VerticalPodAutoscalerCheckpointLister
+	VpaCheckpointSlicesLister   vpaslices_lister.VerticalPodAutoscalerSliceCheckpointLister
+	VpaLister                   vpa_lister.VerticalPodAutoscalerLister
+	VpaSlicesLister             vpaslices_lister.VerticalPodAutoscalerSliceLister
+	NodeLister                  listersv1.NodeLister
+	PodLister                   listersv1.PodLister
+	OOMObserver                 oom.Observer
+	SelectorFetcher             target.VpaTargetSelectorFetcher
+	MemorySaveMode              bool
+	ControllerFetcher           controllerfetcher.ControllerFetcher
+	RecommenderName             string
+	IgnoredNamespaces           []string
+	VpaObjectNamespace          string
+	podsToDelete                []model.PodID
 }
 
 // Make creates new ClusterStateFeeder with internal data providers, based on kube client.
 func (m ClusterStateFeederFactory) Make() *clusterStateFeeder {
 	return &clusterStateFeeder{
-		metricsClient:       m.MetricsClient,
-		oomChan:             m.OOMObserver.GetObservedOomsChannel(),
-		vpaCheckpointClient: m.VpaCheckpointClient,
-		vpaCheckpointLister: m.VpaCheckpointLister,
-		vpaLister:           m.VpaLister,
-		clusterState:        m.ClusterState,
-		specClient:          spec.NewSpecClient(m.PodLister),
-		selectorFetcher:     m.SelectorFetcher,
-		memorySaveMode:      m.MemorySaveMode,
-		controllerFetcher:   m.ControllerFetcher,
-		recommenderName:     m.RecommenderName,
-		ignoredNamespaces:   m.IgnoredNamespaces,
-		vpaObjectNamespace:  m.VpaObjectNamespace,
-		podsToDelete:        m.podsToDelete,
+		metricsClient:             m.MetricsClient,
+		oomChan:                   m.OOMObserver.GetObservedOomsChannel(),
+		vpaCheckpointClient:       m.VpaCheckpointClient,
+		vpaCheckpointSlicesClient: m.VpaCheckpointSlicesClient,
+		vpaSlicesClient:           m.VpaSlicesClient,
+		vpaCheckpointLister:       m.VpaCheckpointLister,
+		vpaCheckpointSlicesLister: m.VpaCheckpointSlicesLister,
+		vpaLister:                 m.VpaLister,
+		vpaSlicesLister:           m.VpaSlicesLister,
+		nodeLister:                m.NodeLister,
+		clusterState:              m.ClusterState,
+		specClient:                spec.NewSpecClient(m.PodLister),
+		selectorFetcher:           m.SelectorFetcher,
+		memorySaveMode:            m.MemorySaveMode,
+		controllerFetcher:         m.ControllerFetcher,
+		recommenderName:           m.RecommenderName,
+		ignoredNamespaces:         m.IgnoredNamespaces,
+		vpaObjectNamespace:        m.VpaObjectNamespace,
+		podsToDelete:              m.podsToDelete,
 	}
 }
 
@@ -230,6 +242,7 @@ type clusterStateFeeder struct {
 	oomChan                   <-chan oom.OomInfo
 	vpaCheckpointClient       vpa_api.VerticalPodAutoscalerCheckpointsGetter
 	vpaCheckpointSlicesClient vpaslices_api.VerticalPodAutoscalerSliceCheckpointsGetter
+	vpaSlicesClient           vpaslices_api.VerticalPodAutoscalerSlicesGetter
 	vpaCheckpointLister       vpa_lister.VerticalPodAutoscalerCheckpointLister
 	vpaCheckpointSlicesLister vpaslices_lister.VerticalPodAutoscalerSliceCheckpointLister
 	vpaLister                 vpa_lister.VerticalPodAutoscalerLister
@@ -522,7 +535,121 @@ func (feeder *clusterStateFeeder) LoadVPAs(ctx context.Context) {
 	feeder.clusterState.SetObservedVPAs(vpaCRDs)
 }
 
+var invalidDNSChars = regexp.MustCompile(`[^a-z0-9-]`)
+
+func sanitizeLabelValue(value string) string {
+	s := strings.ToLower(value)
+	s = invalidDNSChars.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	if len(s) > 63 {
+		s = s[:63]
+		s = strings.TrimRight(s, "-")
+	}
+	return s
+}
+
+func vpaSliceName(vpaName, labelValue string) string {
+	name := fmt.Sprintf("%s-%s", vpaName, sanitizeLabelValue(labelValue))
+	if len(name) > 253 {
+		name = name[:253]
+		name = strings.TrimRight(name, "-")
+	}
+	return name
+}
+
+func (feeder *clusterStateFeeder) ensureVPASlices(ctx context.Context) {
+	allVpaSlicesCRDs, err := feeder.vpaSlicesLister.List(labels.Everything())
+	if err != nil {
+		klog.ErrorS(err, "Cannot list vpaSlices for ensurance")
+		return
+	}
+	existingSlices := make(map[string]bool)
+	for _, s := range allVpaSlicesCRDs {
+		existingSlices[s.Namespace+"/"+s.Name] = true
+	}
+
+	nodes, err := feeder.nodeLister.List(labels.Everything())
+	if err != nil {
+		klog.ErrorS(err, "Cannot list nodes for VPASlice creation")
+		return
+	}
+	nodeLabels := make(map[string]map[string]string, len(nodes))
+	for _, node := range nodes {
+		nodeLabels[node.Name] = node.Labels
+	}
+
+	allPods := feeder.clusterState.Pods()
+
+	for _, observedVpa := range feeder.clusterState.ObservedVPAs() {
+		if observedVpa.Spec.SliceByNodeLabel == nil {
+			continue
+		}
+		labelKey := *observedVpa.Spec.SliceByNodeLabel
+
+		vpaID := model.VpaID{Namespace: observedVpa.Namespace, VpaName: observedVpa.Name}
+		vpa, found := feeder.clusterState.VPAs()[vpaID]
+		if !found {
+			continue
+		}
+
+		// Collect distinct label values only from nodes that run pods matched by this VPA.
+		distinctValues := make(map[string]bool)
+		for _, podID := range feeder.clusterState.GetMatchingPods(vpa) {
+			pod := allPods[podID]
+			if pod == nil || pod.NodeName == "" {
+				continue
+			}
+			if nl, ok := nodeLabels[pod.NodeName]; ok {
+				if v, ok := nl[labelKey]; ok && v != "" {
+					distinctValues[v] = true
+				}
+			}
+		}
+
+		isController := true
+		ownerRef := metav1.OwnerReference{
+			APIVersion: "autoscaling.k8s.io/v1",
+			Kind:       "VerticalPodAutoscaler",
+			Name:       observedVpa.Name,
+			UID:        observedVpa.UID,
+			Controller: &isController,
+		}
+
+		for labelValue := range distinctValues {
+			sliceName := vpaSliceName(observedVpa.Name, labelValue)
+			key := observedVpa.Namespace + "/" + sliceName
+			if existingSlices[key] {
+				continue
+			}
+
+			slice := &vpaslices_types.VerticalPodAutoscalerSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            sliceName,
+					Namespace:       observedVpa.Namespace,
+					OwnerReferences: []metav1.OwnerReference{ownerRef},
+				},
+				Spec: vpaslices_types.VerticalPodAutoscalerSliceSpec{
+					VPAName:      observedVpa.Name,
+					NodeSelector: map[string]string{labelKey: labelValue},
+				},
+			}
+			_, err := feeder.vpaSlicesClient.VerticalPodAutoscalerSlices(observedVpa.Namespace).Create(ctx, slice, metav1.CreateOptions{})
+			if err != nil {
+				klog.ErrorS(err, "Failed to create VPASlice",
+					"vpaSlice", klog.KRef(observedVpa.Namespace, sliceName),
+					"vpa", klog.KRef(observedVpa.Namespace, observedVpa.Name))
+			} else {
+				klog.V(3).InfoS("Created VPASlice",
+					"vpaSlice", klog.KRef(observedVpa.Namespace, sliceName),
+					"labelValue", labelValue)
+			}
+		}
+	}
+}
+
 func (feeder *clusterStateFeeder) LoadVPASlices(ctx context.Context) {
+	feeder.ensureVPASlices(ctx)
+
 	allVpaSlicesCRDs, err := feeder.vpaSlicesLister.List(labels.Everything())
 	if err != nil {
 		klog.ErrorS(err, "Cannot list vpaSlices")
