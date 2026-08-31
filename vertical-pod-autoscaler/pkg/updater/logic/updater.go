@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 
@@ -46,6 +47,7 @@ import (
 	vpa_clientset "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/scheme"
 	vpa_lister "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/listers/autoscaling.k8s.io/v1"
+	vpaslices_lister "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/listers/autoscaling.k8s.io/v1alpha1"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/features"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/target"
 	controllerfetcher "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/target/controller_fetcher"
@@ -85,8 +87,11 @@ type Updater interface {
 }
 
 type updater struct {
+	vpaClient                    *vpa_clientset.Clientset
 	vpaLister                    vpa_lister.VerticalPodAutoscalerLister
+	vpaSliceLister               vpaslices_lister.VerticalPodAutoscalerSliceLister
 	podLister                    listersv1.PodLister
+	nodeLister                   listersv1.NodeLister
 	eventRecorder                record.EventRecorder
 	restrictionFactory           restriction.PodsRestrictionFactory
 	recommendationProcessor      vpa_api_util.RecommendationProcessor
@@ -148,8 +153,10 @@ func NewUpdater(
 	)
 
 	u := &updater{
+		vpaClient:                    vpaClient,
 		vpaLister:                    vpa_api_util.NewVpasLister(vpaClient, make(chan struct{}), namespace),
 		podLister:                    podInformerFactory.Core().V1().Pods().Lister(),
+		nodeLister:                   kubeInformerFactory.Core().V1().Nodes().Lister(),
 		eventRecorder:                newEventRecorder(kubeClient),
 		restrictionFactory:           factory,
 		recommendationProcessor:      recommendationProcessor,
@@ -188,6 +195,10 @@ func NewUpdater(
 		}
 	}
 
+	if features.Enabled(features.VPASlices) {
+		u.vpaSliceLister = vpa_api_util.NewVpaSlicesLister(vpaClient, make(<-chan struct{}), namespace)
+	}
+
 	return u, nil
 }
 
@@ -218,9 +229,16 @@ func (u *updater) RunOnce(ctx context.Context) {
 	timer.ObserveStep("ListVPAs")
 
 	vpas := make([]*vpa_api_util.VpaWithSelector, 0)
+	vpaSlices := make([]*vpa_api_util.VpaSliceWithNodeSelector, 0)
 
 	inPlaceFeatureEnabled := features.Enabled(features.InPlace)
 	for _, vpa := range vpaList {
+		if features.Enabled(features.VPASlices) {
+			if vpa.Spec.SliceByNodeLabel != nil {
+				klog.InfoS("Skipping VPA since it has SliceByNodeLabel field", klog.KObj(vpa), "namespace", vpa.Namespace)
+				continue
+			}
+		}
 		if slices.Contains(u.ignoredNamespaces, vpa.Namespace) {
 			klog.V(3).InfoS("Skipping VPA object in ignored namespace", "vpa", klog.KObj(vpa), "namespace", vpa.Namespace)
 			continue
@@ -229,6 +247,7 @@ func (u *updater) RunOnce(ctx context.Context) {
 		logDeprecationWarnings(vpa)
 
 		updateMode := vpa_api_util.GetUpdateMode(vpa)
+		// TODO: can we move this to a dedicated function?
 		if updateMode != vpa_types.UpdateModeRecreate &&
 			updateMode != vpa_types.UpdateModeAuto && //nolint:staticcheck
 			updateMode != vpa_types.UpdateModeInPlaceOrRecreate &&
@@ -249,8 +268,48 @@ func (u *updater) RunOnce(ctx context.Context) {
 		})
 	}
 
-	if len(vpas) == 0 {
-		klog.V(0).InfoS("No VPA objects to process")
+	if features.Enabled(features.VPASlices) {
+		vpaSliceList, err := u.vpaSliceLister.List(labels.Everything())
+		if err != nil {
+			klog.ErrorS(err, "Failed to get VPA list")
+			// what should we do here?
+		}
+		for _, vpaSlice := range vpaSliceList {
+			parentVPAName := vpaSlice.Spec.VPAName // TODO: maybe this should be in status
+			if parentVPAName == "" {
+				klog.ErrorS(nil, "vpaSlice.Spec.VPAName is nil", "vpaSlice", vpaSlice)
+				continue
+			}
+			parentVPAObject, err := u.vpaClient.AutoscalingV1().VerticalPodAutoscalers(vpaSlice.Namespace).Get(context.TODO(), parentVPAName, metav1.GetOptions{})
+			if err != nil {
+				klog.ErrorS(err, "failed to get parent VPA object", "parentVPAName", parentVPAName, "parentVPANamespace", vpaSlice.Namespace)
+				continue
+			}
+			updateMode := vpa_api_util.GetUpdateMode(parentVPAObject)
+			if updateMode != vpa_types.UpdateModeRecreate &&
+				updateMode != vpa_types.UpdateModeAuto && //nolint:staticcheck
+				updateMode != vpa_types.UpdateModeInPlaceOrRecreate &&
+				updateMode != vpa_types.UpdateModeInPlace &&
+				!vpa_api_util.HasStartupBoost(parentVPAObject) {
+				klog.V(3).InfoS("Skipping VPA object because its mode is not  \"InPlaceOrRecreate\", \"InPlace\", \"Recreate\" or \"Auto\" and it doesn't have startupBoost configured", "vpa", klog.KObj(parentVPAObject))
+				continue
+			}
+
+			selector, err := u.selectorFetcher.Fetch(ctx, parentVPAObject)
+			if err != nil {
+				klog.V(3).ErrorS(err, "Skipping VPA object because we cannot fetch selector", "vpa", klog.KObj(parentVPAObject))
+				continue
+			}
+			vpaSlices = append(vpaSlices, &vpa_api_util.VpaSliceWithNodeSelector{
+				Slice:     vpaSlice,
+				ParentVpa: parentVPAObject,
+				Selector:  selector,
+			})
+		}
+	}
+
+	if len(vpas) == 0 && len(vpaSlices) == 0 {
+		klog.V(0).InfoS("No VPA or VPA Slices objects to process")
 		if u.evictionAdmission != nil {
 			u.evictionAdmission.CleanUp()
 		}
@@ -266,9 +325,17 @@ func (u *updater) RunOnce(ctx context.Context) {
 	allLivePods := filterDeletedPods(podsList)
 
 	controlledPods := make(map[*vpa_types.VerticalPodAutoscaler][]*corev1.Pod)
+	controlledPodsByVpaSlice := make(map[*vpa_api_util.VpaSliceWithNodeSelector][]*corev1.Pod)
 	livePodUIDs := set.New[types.UID]()
 	for _, pod := range allLivePods {
 		livePodUIDs.Insert(pod.UID)
+		if features.Enabled(features.VPASlices) {
+			controllingVPASlice := vpa_api_util.GetControllingVPASliceForPod(ctx, pod, vpaSlices, u.controllerFetcher, u.nodeLister)
+			if controllingVPASlice != nil {
+				controlledPodsByVpaSlice[controllingVPASlice] = append(controlledPodsByVpaSlice[controllingVPASlice], pod)
+				continue
+			}
+		}
 		controllingVPA := vpa_api_util.GetControllingVPAForPod(ctx, pod, vpas, u.controllerFetcher)
 		if controllingVPA != nil {
 			controlledPods[controllingVPA.Vpa] = append(controlledPods[controllingVPA.Vpa], pod)
@@ -282,7 +349,12 @@ func (u *updater) RunOnce(ctx context.Context) {
 	timer.ObserveStep("FilterPods")
 
 	if u.evictionAdmission != nil {
-		u.evictionAdmission.LoopInit(allLivePods, controlledPods)
+		allControlledPods := make(map[*vpa_types.VerticalPodAutoscaler][]*corev1.Pod, len(controlledPods))
+		maps.Copy(allControlledPods, controlledPods)
+		for sliceWithSelector, pods := range controlledPodsByVpaSlice {
+			allControlledPods[sliceWithSelector.ParentVpa] = append(allControlledPods[sliceWithSelector.ParentVpa], pods...)
+		}
+		u.evictionAdmission.LoopInit(allLivePods, allControlledPods)
 	}
 	timer.ObserveStep("AdmissionInit")
 
@@ -292,6 +364,8 @@ func (u *updater) RunOnce(ctx context.Context) {
 	inPlaceUpdatablePodsCounter := metrics_updater.NewInPlaceUpdatablePodsCounter()
 	vpasWithEvictablePodsCounter := metrics_updater.NewVpasWithEvictablePodsCounter()
 	vpasWithEvictedPodsCounter := metrics_updater.NewVpasWithEvictedPodsCounter()
+
+	// TODO: add metrics for VPA slices
 
 	vpasWithInPlaceUpdatablePodsCounter := metrics_updater.NewVpasWithInPlaceUpdatablePodsCounter()
 	vpasWithInPlaceUpdatedPodsCounter := metrics_updater.NewVpasWithInPlaceUpdatedPodsCounter()
@@ -463,6 +537,158 @@ func (u *updater) RunOnce(ctx context.Context) {
 			vpasWithEvictedPodsCounter.Add(vpaSize, updateMode, 1)
 		}
 	}
+	// TODO(omerap12): Refactor the VPA and VPA slice loops into a shared helper to reduce duplication.
+	for sliceWithSelector, livePods := range controlledPodsByVpaSlice {
+		parentVpa := sliceWithSelector.ParentVpa
+		vpa := parentVpa.DeepCopy()
+		// TODO(omerap12): This is a hack — swapping the recommendation on a DeepCopy'd VPA so
+		// existing helpers work unchanged. Should be refactored to pass the recommendation explicitly.
+		vpa.Status.Recommendation = sliceWithSelector.Slice.Status.Recommendation
+		
+		// TODO(omerap12): This is a hack — VPA slices are node-scoped so each slice naturally has
+		// fewer pods than the full workload (e.g. a DaemonSet with 2 pods across 2 nodes yields
+		// 1 pod per slice). The restriction factory's replica count check would block updates for
+		// slices with fewer pods than minReplicas. Setting MinReplicas to 0 skips this check.
+		// Should be refactored so the restriction factory is slice-aware instead.
+		minReplicas := int32(0)
+		if vpa.Spec.UpdatePolicy == nil {
+			vpa.Spec.UpdatePolicy = &vpa_types.PodUpdatePolicy{}
+		}
+		vpa.Spec.UpdatePolicy.MinReplicas = &minReplicas
+
+		vpaSize := len(livePods)
+		updateMode := vpa_api_util.GetUpdateMode(vpa)
+		controlledPodsCounter.Add(vpaSize, updateMode, vpaSize)
+		creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := u.restrictionFactory.GetCreatorMaps(livePods, vpa)
+		if err != nil {
+			klog.ErrorS(err, "Failed to get creator maps for VPA slice", "vpaSlice", klog.KObj(sliceWithSelector.Slice))
+			continue
+		}
+		metrics_updater.InitCounters(vpaSize, vpa.Name, vpa.Namespace, updateMode)
+
+		inPlaceLimiter := u.restrictionFactory.NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
+		withInPlaceUpdated := false
+
+		// TODO(omerap12): CPU startup boost is not yet supported for VPA slices.
+		podsAvailableForUpdate := livePods
+
+		if updateMode == vpa_types.UpdateModeOff || updateMode == vpa_types.UpdateModeInitial {
+			continue
+		}
+
+		evictionLimiter := u.restrictionFactory.NewPodsEvictionRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
+		podsForEviction := make([]*corev1.Pod, 0)
+		podsForInPlace := make([]*corev1.Pod, 0)
+		withInPlaceUpdatable := false
+		withEvictable := false
+
+		if (updateMode == vpa_types.UpdateModeInPlaceOrRecreate) || (updateMode == vpa_types.UpdateModeInPlace && inPlaceFeatureEnabled) {
+			podsForInPlace = u.getPodsUpdateOrder(filterNonInPlaceUpdatablePods(podsAvailableForUpdate, inPlaceLimiter, vpa, len(livePods), u.infeasibleAttempts, u.eventRecorder), vpa)
+			inPlaceUpdatablePodsCounter.Add(vpaSize, len(podsForInPlace))
+			if len(podsForInPlace) > 0 {
+				withInPlaceUpdatable = true
+			}
+		} else {
+			if updateMode == vpa_types.UpdateModeInPlace {
+				klog.InfoS("Warning: feature gate is not enabled for this updateMode", "featuregate", features.InPlace, "updateMode", updateMode)
+				continue
+			}
+			podsForEviction = u.getPodsUpdateOrder(filterNonEvictablePods(podsAvailableForUpdate, evictionLimiter), vpa)
+			evictablePodsCounter.Add(vpaSize, updateMode, len(podsForEviction))
+			if len(podsForEviction) > 0 {
+				withEvictable = true
+			}
+		}
+
+		withEvicted := false
+
+		for _, pod := range podsForInPlace {
+			decision := inPlaceLimiter.CanInPlaceUpdate(pod, vpa, u.infeasibleAttempts)
+
+			switch decision {
+			case utils.InPlaceDeferred:
+				if updateMode == vpa_types.UpdateModeInPlaceOrRecreate {
+					klog.V(0).InfoS("In-place update deferred", "pod", klog.KObj(pod))
+					continue
+				}
+				klog.V(2).InfoS("In-place update deferred", "pod", klog.KObj(pod))
+			case utils.InPlaceEvict:
+				podsForEviction = append(podsForEviction, pod)
+				continue
+			case utils.InPlaceInfeasibleCached:
+				klog.V(2).InfoS("In-place update infeasible, no resource is lower in new recommendation, skipping pod", "pod", klog.KObj(pod))
+				continue
+			case utils.InPlaceInfeasible:
+				klog.V(2).InfoS("In-place update infeasible, retrying with new recommendation", "pod", klog.KObj(pod))
+				u.recordInfeasibleAttempt(pod, vpa)
+			case utils.InPlaceApproved:
+				klog.V(2).InfoS("In-place update approved", "pod", klog.KObj(pod))
+			default:
+				klog.ErrorS(nil, "Unexpected in-place update decision, skipping pod", "decision", decision, "pod", klog.KObj(pod))
+				continue
+			}
+
+			err = u.inPlaceRateLimiter.Wait(ctx)
+			if err != nil {
+				klog.V(0).InfoS("In-place rate limiter wait failed for in-place resize", "error", err)
+				metrics_updater.RecordFailedInPlaceUpdate(vpaSize, vpa.Name, vpa.Namespace, "InPlaceUpdateRateLimiterWaitFailed")
+				return
+			}
+			err := inPlaceLimiter.InPlaceUpdate(pod, vpa, u.eventRecorder)
+			if err != nil {
+				reason := "InPlaceUpdateError"
+				if updateMode == vpa_types.UpdateModeInPlace {
+					if isInfeasibleError(err) {
+						reason = "InPlaceUpdateInfeasible"
+						u.recordInfeasibleAttempt(pod, vpa)
+					}
+					klog.V(0).InfoS("In-place resize failed", "error", err, "pod", klog.KObj(pod), "reason", reason)
+					metrics_updater.RecordFailedInPlaceUpdate(vpaSize, vpa.Name, vpa.Namespace, reason)
+					continue
+				}
+				klog.V(0).InfoS("In-place resize failed, falling back to eviction", "error", err, "pod", klog.KObj(pod))
+				metrics_updater.RecordFailedInPlaceUpdate(vpaSize, vpa.Name, vpa.Namespace, reason)
+				podsForEviction = append(podsForEviction, pod)
+				continue
+			}
+			withInPlaceUpdated = true
+			metrics_updater.AddInPlaceUpdatedPod(vpaSize, vpa.Name, vpa.Namespace)
+		}
+
+		for _, pod := range podsForEviction {
+			if !evictionLimiter.CanEvict(pod) {
+				continue
+			}
+			err = u.evictionRateLimiter.Wait(ctx)
+			if err != nil {
+				klog.V(0).InfoS("Eviction rate limiter wait failed", "error", err)
+				metrics_updater.RecordFailedEviction(vpaSize, vpa.Name, vpa.Namespace, updateMode, "EvictionRateLimiterWaitFailed")
+				return
+			}
+			klog.V(2).InfoS("Evicting pod", "pod", klog.KObj(pod))
+			evictErr := evictionLimiter.Evict(pod, vpa, u.eventRecorder)
+			if evictErr != nil {
+				klog.V(0).InfoS("Eviction failed", "error", evictErr, "pod", klog.KObj(pod))
+				metrics_updater.RecordFailedEviction(vpaSize, vpa.Name, vpa.Namespace, updateMode, "EvictionError")
+			} else {
+				withEvicted = true
+				metrics_updater.AddEvictedPod(vpaSize, vpa.Name, vpa.Namespace, updateMode)
+			}
+		}
+
+		if withInPlaceUpdatable {
+			vpasWithInPlaceUpdatablePodsCounter.Add(vpaSize, 1)
+		}
+		if withInPlaceUpdated {
+			vpasWithInPlaceUpdatedPodsCounter.Add(vpaSize, 1)
+		}
+		if withEvictable {
+			vpasWithEvictablePodsCounter.Add(vpaSize, updateMode, 1)
+		}
+		if withEvicted {
+			vpasWithEvictedPodsCounter.Add(vpaSize, updateMode, 1)
+		}
+	}
 	timer.ObserveStep("EvictPods")
 }
 
@@ -563,6 +789,8 @@ func (u *updater) processNextBoostItem(ctx context.Context) bool {
 		return true
 	}
 
+	// TODO(omerap12): When CPU startup boost is supported for VPA slices, also check
+	// for a controlling VPA slice here (getControllingVPASliceForPod).
 	vpaWithSelector, err := u.getControllingVPAForPod(ctx, pod)
 	if err != nil {
 		logger.Error(err, "Failed to get controlling VPA")

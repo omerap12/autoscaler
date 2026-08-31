@@ -157,6 +157,7 @@ func run(healthCheck *metrics.HealthCheck, commonFlag *common.CommonFlags) {
 	kubeConfig := common.CreateKubeConfigOrDie(commonFlag.KubeConfig, float32(commonFlag.KubeApiQps), int(commonFlag.KubeApiBurst))
 	kubeClient := kube_client.NewForConfigOrDie(kubeConfig)
 	vpaClient := vpa_clientset.NewForConfigOrDie(kubeConfig)
+
 	kubeFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, defaultResyncPeriod,
 		informers.WithNamespace(commonFlag.VpaObjectNamespace),
 		informers.WithTransform(client.StripManagedFields),

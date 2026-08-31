@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
+	listersv1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
 	vpa_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
@@ -48,6 +49,14 @@ import (
 type VpaWithSelector struct {
 	Vpa      *vpa_types.VerticalPodAutoscaler
 	Selector labels.Selector
+}
+
+// VpaSliceWithNodeSelector pairs a VPASlice with its parent VPA's pod selector,
+// allowing the updater to match pods by label and then narrow by node.
+type VpaSliceWithNodeSelector struct {
+	Slice     *vpaslices_types.VerticalPodAutoscalerSlice
+	ParentVpa *vpa_types.VerticalPodAutoscaler
+	Selector  labels.Selector
 }
 
 // TargetRefIndex is the name of the informer index that indexes VPA objects
@@ -329,6 +338,62 @@ func FindParentControllerForPod(ctx context.Context, pod *corev1.Pod, ctrlFetche
 		return nil, err
 	}
 	return controller, nil
+}
+
+// PodMatchesVPASlice returns true iff the VPA slice's parent VPA selector matches the pod
+// and the pod's node labels match the slice's NodeSelector.
+func PodMatchesVPASlice(pod *corev1.Pod, sliceWithSelector *VpaSliceWithNodeSelector, nodeLister listersv1.NodeLister) bool {
+	if !PodLabelsMatchVPA(pod.Namespace, labels.Set(pod.GetLabels()), sliceWithSelector.ParentVpa.Namespace, sliceWithSelector.Selector) {
+		return false
+	}
+	if pod.Spec.NodeName == "" {
+		return false
+	}
+	node, err := nodeLister.Get(pod.Spec.NodeName)
+	if err != nil {
+		klog.V(4).ErrorS(err, "Failed to get node for pod", "pod", klog.KObj(pod), "node", pod.Spec.NodeName)
+		return false
+	}
+	nodeLabels := labels.Set(node.Labels)
+	for k, v := range sliceWithSelector.Slice.Spec.NodeSelector {
+		if nodeLabels.Get(k) != v {
+			return false
+		}
+	}
+	return true
+}
+
+// GetControllingVPASliceForPod chooses the earliest created VPA slice (by parent VPA creation time)
+// from the input list that matches the given Pod and its node.
+func GetControllingVPASliceForPod(ctx context.Context, pod *corev1.Pod, vpaSlices []*VpaSliceWithNodeSelector, ctrlFetcher controllerfetcher.ControllerFetcher, nodeLister listersv1.NodeLister) *VpaSliceWithNodeSelector {
+	parentController, err := FindParentControllerForPod(ctx, pod, ctrlFetcher)
+	if err != nil {
+		klog.ErrorS(err, "Failed to get parent controller for pod", "pod", klog.KObj(pod))
+		return nil
+	}
+	if parentController == nil {
+		return nil
+	}
+
+	var controlling *VpaSliceWithNodeSelector
+	var controllingVpa *vpa_types.VerticalPodAutoscaler
+	for _, sliceWithSelector := range vpaSlices {
+		parentVpa := sliceWithSelector.ParentVpa
+		if parentVpa.Spec.TargetRef == nil {
+			klog.V(5).InfoS("Skipping VPA slice because parent VPA targetRef is not defined", "vpaSlice", klog.KObj(sliceWithSelector.Slice))
+			continue
+		}
+		if parentVpa.Spec.TargetRef.Kind != parentController.Kind ||
+			parentVpa.Namespace != parentController.Namespace ||
+			parentVpa.Spec.TargetRef.Name != parentController.Name {
+			continue
+		}
+		if PodMatchesVPASlice(pod, sliceWithSelector, nodeLister) && Stronger(parentVpa, controllingVpa) {
+			controlling = sliceWithSelector
+			controllingVpa = parentVpa
+		}
+	}
+	return controlling
 }
 
 // GetUpdateMode returns the updatePolicy.updateMode for a given VPA.
