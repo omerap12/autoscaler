@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/informers"
 	kube_client "k8s.io/client-go/kubernetes"
 	typedadmregv1 "k8s.io/client-go/kubernetes/typed/admissionregistration/v1"
+	listersv1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
 	"k8s.io/autoscaler/vertical-pod-autoscaler/common"
@@ -36,6 +37,8 @@ import (
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/admission-controller/resource/pod/recommendation"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/admission-controller/resource/vpa"
 	vpa_clientset "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned"
+	vpaslices_lister "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/listers/autoscaling.k8s.io/v1alpha1"
+	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/features"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/target"
 	controllerfetcher "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/target/controller_fetcher"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/client"
@@ -88,7 +91,14 @@ func main() {
 		limitRangeCalculator = limitrange.NewNoopLimitsCalculator()
 	}
 	recommendationProvider := recommendation.NewProvider(limitRangeCalculator, vpa_api_util.NewCappingRecommendationProcessor(limitRangeCalculator))
-	vpaMatcher := vpa.NewMatcher(vpaIndexer, targetSelectorFetcher, controllerFetcher)
+
+	var vpaSliceLister vpaslices_lister.VerticalPodAutoscalerSliceLister
+	var nodeLister listersv1.NodeLister
+	if features.Enabled(features.VPASlices) {
+		vpaSliceLister = vpa_api_util.NewVpaSlicesLister(vpaClient, stopCh, config.CommonFlags.VpaObjectNamespace)
+		nodeLister = factory.Core().V1().Nodes().Lister()
+	}
+	vpaMatcher := vpa.NewMatcher(vpaIndexer, targetSelectorFetcher, controllerFetcher, vpaSliceLister, nodeLister)
 
 	factory.Start(stopCh)
 	informerMap := factory.WaitForCacheSync(stopCh)

@@ -198,7 +198,7 @@ func TestGetMatchingVpa(t *testing.T) {
 			// In other words, it cannot go through the hierarchy of controllers like "ReplicaSet => Deployment"
 			// For this reason we are using "StatefulSet" as the ownerRef kind in the test, since it is a direct link.
 			// The hierarchy part is being test in the "TestControllerFetcher" test.
-			matcher := NewMatcher(vpaIndexer, mockSelectorFetcher, controllerfetcher.FakeControllerFetcher{})
+			matcher := NewMatcher(vpaIndexer, mockSelectorFetcher, controllerfetcher.FakeControllerFetcher{}, nil, nil)
 
 			vpa := matcher.GetMatchingVPA(context.Background(), tc.pod)
 			if tc.expectedFound && assert.NotNil(t, vpa) {

@@ -83,7 +83,7 @@ func setupMatcherBenchmark(b *testing.B, vpaCount int) (Matcher, *corev1.Pod) {
 	}
 
 	selectorFetcher := &fixedSelectorFetcher{selector: parseLabelSelector("app = test")}
-	matcher := NewMatcher(indexer, selectorFetcher, controllerfetcher.FakeControllerFetcher{})
+	matcher := NewMatcher(indexer, selectorFetcher, controllerfetcher.FakeControllerFetcher{}, nil, nil)
 	return matcher, pod
 }
 

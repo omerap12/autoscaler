@@ -19,6 +19,7 @@ package vpa
 import (
 	"fmt"
 
+	v1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
 	apires "k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -33,6 +34,7 @@ type VPAValidationOptions struct {
 	AllowCPUStartupBoost bool
 	AllowPerVPAConfig    bool
 	AllowInPlace         bool
+	AllowVpaSlice        bool
 	// ExistingControlledResources contains the controlled resources already
 	// present in the old VPA object, which stay allowed on update even if
 	// they wouldn't be accepted on create.
@@ -45,6 +47,7 @@ func getValidationOptionsForVPA(oldObj *vpa_types.VerticalPodAutoscaler) VPAVali
 		AllowCPUStartupBoost:        allowCPUBoost(oldObj),
 		AllowPerVPAConfig:           allowPerVPAConfig(oldObj),
 		AllowInPlace:                allowInPlace(oldObj),
+		AllowVpaSlice:               allowVpaSlice(oldObj),
 		ExistingControlledResources: existingControlledResources(oldObj),
 	}
 
@@ -130,6 +133,19 @@ func allowInPlace(oldObj *vpa_types.VerticalPodAutoscaler) bool {
 	return false
 }
 
+func allowVpaSlice(oldObj *vpa_types.VerticalPodAutoscaler) bool {
+	if features.Enabled(features.VPASlices) {
+		return true
+	}
+	if oldObj == nil {
+		return false
+	}
+	if oldObj.Spec.SliceByNodeLabel != nil && *oldObj.Spec.SliceByNodeLabel != "" {
+		return true
+	}
+	return false
+}
+
 func validateVPA(vpa *vpa_types.VerticalPodAutoscaler, opts VPAValidationOptions) ([]string, field.ErrorList) {
 	return validateVPASpec(&vpa.Spec, field.NewPath("spec"), opts)
 }
@@ -151,6 +167,12 @@ func validateVPASpec(spec *vpa_types.VerticalPodAutoscalerSpec, fldPath *field.P
 
 	if spec.ResourcePolicy != nil {
 		policyWarnings, policyErrs := validateVPASpecResourcePolicy(spec.ResourcePolicy, fldPath.Child("resourcePolicy"), opts)
+		warnings = append(warnings, policyWarnings...)
+		allErrs = append(allErrs, policyErrs...)
+	}
+
+	if spec.SliceByNodeLabel != nil && *spec.SliceByNodeLabel != "" {
+		policyWarnings, policyErrs := validateVPASpecSliceByNodeLabel(spec.TargetRef, spec.UpdatePolicy, *spec.SliceByNodeLabel, fldPath.Child("SliceByNodeLabel"), opts)
 		warnings = append(warnings, policyWarnings...)
 		allErrs = append(allErrs, policyErrs...)
 	}
@@ -197,6 +219,26 @@ func validateVPASpecUpdatePolicy(updatePolicy *vpa_types.PodUpdatePolicy, fldPat
 		} else {
 			allErrs = append(allErrs, field.Forbidden(fldPath.Child("evictAfterOOMSeconds"), fmt.Sprintf("not supported when feature flag %s is disabled", features.PerVPAConfig)))
 		}
+	}
+
+	return warnings, allErrs
+}
+
+func validateVPASpecSliceByNodeLabel(targetRef *v1.CrossVersionObjectReference, updatePolicy *vpa_types.PodUpdatePolicy, _ string, fldPath *field.Path, opts VPAValidationOptions) ([]string, field.ErrorList) {
+	allErrs := field.ErrorList{}
+	var warnings []string
+
+	if !opts.AllowVpaSlice {
+		allErrs = append(allErrs, field.Forbidden(fldPath, fmt.Sprintf("in order to use SliceByNodeLabel, you must enable feature gate %s in the admission-controller args", features.VPASlices)))
+		return warnings, allErrs
+	}
+
+	if targetRef.Kind != "DaemonSet" {
+		allErrs = append(allErrs, field.Forbidden(fldPath, "SliceByNodeLabel is only supported for DaemonSet targets"))
+	}
+
+	if updatePolicy == nil || updatePolicy.UpdateMode == nil || *updatePolicy.UpdateMode != vpa_types.UpdateModeInPlace {
+		allErrs = append(allErrs, field.Forbidden(fldPath, "SliceByNodeLabel requires InPlace update mode"))
 	}
 
 	return warnings, allErrs

@@ -339,6 +339,14 @@ rules:
       - list
       - watch
   - apiGroups:
+      - "autoscaling.k8s.io"
+    resources:
+      - verticalpodautoscalerslices
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
       - "coordination.k8s.io"
     resources:
       - leases
