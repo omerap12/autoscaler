@@ -18,6 +18,7 @@ package vpa
 
 import (
 	"context"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -115,18 +116,21 @@ func (m *matcher) matchVPASlice(pod *corev1.Pod, controllingVpa *vpa_types.Verti
 		klog.V(3).InfoS("VPA slice lister or node lister not configured, skipping VPA slice matching")
 		return nil
 	}
-	// TODO: DaemonSet pods scheduled via node affinity and won't have NodeName set
-	// at admission time, so the admission controller cannot match them to a VPA slice.
-	// TODO: maybe write a code here that gets the node which the daemonset pod should be scheduled on?
-	// for now we will require to have only InPlace update mode on those workload (to avoid evictions loop of the updater)
-	if pod.Spec.NodeName == "" {
-		klog.V(4).InfoS("Pod has no node name, cannot match VPA slice", "pod", klog.KObj(pod))
+
+	if controllingVpa.Spec.SliceByNodeLabel == nil {
+		klog.V(3).InfoS("VPA has no vpaSlice configured")
 		return nil
 	}
 
-	node, err := m.nodeLister.Get(pod.Spec.NodeName)
+	nodeName, err := GetNodeNameFromDaemonSetPod(pod)
 	if err != nil {
-		klog.ErrorS(err, "Failed to get node for pod", "pod", klog.KObj(pod), "node", pod.Spec.NodeName)
+		klog.ErrorS(err, "GetNodeNameFromDaemonSetPod function return err")
+		return nil
+	}
+
+	node, err := m.nodeLister.Get(nodeName)
+	if err != nil {
+		klog.ErrorS(err, "Failed to get node for pod", "pod", klog.KObj(pod), "node", nodeName)
 		return nil
 	}
 
@@ -158,4 +162,35 @@ func (m *matcher) matchVPASlice(pod *corev1.Pod, controllingVpa *vpa_types.Verti
 
 	klog.V(4).InfoS("No matching VPA slice found for pod", "pod", klog.KObj(pod), "vpa", klog.KObj(controllingVpa))
 	return nil
+}
+
+// TODO: do we have any upstream function we can use instead of doing this "manually"?
+// The function get the node name which the dameonset pod should be scheduled on.
+// Once we have that node we can get the node's labels.
+// TODO: add unit tests
+func GetNodeNameFromDaemonSetPod(pod *corev1.Pod) (string, error) {
+	affinity := pod.Spec.Affinity
+	if affinity == nil {
+		return "", fmt.Errorf("pod has no affinity")
+	}
+
+	nodeAffinity := affinity.NodeAffinity
+	if nodeAffinity == nil {
+		return "", fmt.Errorf("pod has no node affinity")
+	}
+
+	required := nodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+	if required == nil {
+		return "", fmt.Errorf("pod has no required node affinity terms")
+	}
+
+	for _, term := range required.NodeSelectorTerms {
+		for _, field := range term.MatchFields {
+			if field.Key == "metadata.name" && field.Operator == corev1.NodeSelectorOpIn && len(field.Values) > 0 {
+				return field.Values[0], nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("pod has no metadata.name matchFields selector")
 }
