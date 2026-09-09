@@ -183,7 +183,7 @@ func validateVPASpec(spec *vpa_types.VerticalPodAutoscalerSpec, fldPath *field.P
 	}
 
 	if spec.SliceByNodeLabel != nil && *spec.SliceByNodeLabel != "" {
-		policyWarnings, policyErrs := validateVPASpecSliceByNodeLabel(spec.TargetRef, spec.UpdatePolicy, *spec.SliceByNodeLabel, fldPath.Child("SliceByNodeLabel"), opts)
+		policyWarnings, policyErrs := validateVPASpecSliceByNodeLabel(spec.TargetRef, fldPath.Child("SliceByNodeLabel"), opts)
 		warnings = append(warnings, policyWarnings...)
 		allErrs = append(allErrs, policyErrs...)
 	}
@@ -238,7 +238,7 @@ func validateVPASpecUpdatePolicy(updatePolicy *vpa_types.PodUpdatePolicy, fldPat
 	return warnings, allErrs
 }
 
-func validateVPASpecSliceByNodeLabel(targetRef *v1.CrossVersionObjectReference, updatePolicy *vpa_types.PodUpdatePolicy, _ string, fldPath *field.Path, opts VPAValidationOptions) ([]string, field.ErrorList) {
+func validateVPASpecSliceByNodeLabel(targetRef *v1.CrossVersionObjectReference, fldPath *field.Path, opts VPAValidationOptions) ([]string, field.ErrorList) {
 	allErrs := field.ErrorList{}
 	var warnings []string
 
@@ -249,10 +249,6 @@ func validateVPASpecSliceByNodeLabel(targetRef *v1.CrossVersionObjectReference, 
 
 	if targetRef.Kind != "DaemonSet" {
 		allErrs = append(allErrs, field.Forbidden(fldPath, "SliceByNodeLabel is only supported for DaemonSet targets"))
-	}
-
-	if updatePolicy == nil || updatePolicy.UpdateMode == nil || *updatePolicy.UpdateMode != vpa_types.UpdateModeInPlace {
-		allErrs = append(allErrs, field.Forbidden(fldPath, "SliceByNodeLabel requires InPlace update mode"))
 	}
 
 	return warnings, allErrs
