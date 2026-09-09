@@ -169,6 +169,17 @@ func validateVPASpec(spec *vpa_types.VerticalPodAutoscalerSpec, fldPath *field.P
 		policyWarnings, policyErrs := validateVPASpecResourcePolicy(spec.ResourcePolicy, fldPath.Child("resourcePolicy"), opts)
 		warnings = append(warnings, policyWarnings...)
 		allErrs = append(allErrs, policyErrs...)
+
+		if spec.SliceByNodeLabel != nil && *spec.SliceByNodeLabel != "" {
+			for i, policy := range spec.ResourcePolicy.ContainerPolicies {
+				if policy.StartupBoost != nil && policy.StartupBoost.CPU != nil {
+					allErrs = append(allErrs, field.Forbidden(
+						fldPath.Child("resourcePolicy", "containerPolicies").Index(i).Child("startupBoost", "cpu"),
+						"CPU startup boost cannot be used together with sliceByNodeLabel",
+					))
+				}
+			}
+		}
 	}
 
 	if spec.SliceByNodeLabel != nil && *spec.SliceByNodeLabel != "" {
@@ -179,6 +190,9 @@ func validateVPASpec(spec *vpa_types.VerticalPodAutoscalerSpec, fldPath *field.P
 
 	if spec.StartupBoost != nil {
 		allErrs = append(allErrs, validateVPASpecStartupBoost(spec.StartupBoost, fldPath.Child("startupBoost"), opts)...)
+		if spec.StartupBoost.CPU != nil && spec.SliceByNodeLabel != nil && *spec.SliceByNodeLabel != "" {
+			allErrs = append(allErrs, field.Forbidden(fldPath.Child("startupBoost", "cpu"), "CPU startup boost cannot be used together with sliceByNodeLabel"))
+		}
 	}
 
 	if len(spec.Recommenders) > 1 {

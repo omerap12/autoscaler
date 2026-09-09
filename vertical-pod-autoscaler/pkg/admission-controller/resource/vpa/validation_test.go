@@ -920,6 +920,59 @@ func TestValidateVPA(t *testing.T) {
 			opts: VPAValidationOptions{IsVPACreate: true, AllowCPUStartupBoost: true},
 		},
 		{
+			name: "top-level CPU startupBoost with sliceByNodeLabel",
+			vpa: vpa_types.VerticalPodAutoscaler{
+				Spec: vpa_types.VerticalPodAutoscalerSpec{
+					TargetRef: &autoscalingv1.CrossVersionObjectReference{
+						Kind: "DaemonSet",
+						Name: "my-app",
+					},
+					UpdatePolicy: &vpa_types.PodUpdatePolicy{
+						UpdateMode: &inPlaceUpdateMode,
+					},
+					SliceByNodeLabel: ptr.To("topology.kubernetes.io/zone"),
+					StartupBoost: &vpa_types.StartupBoost{
+						CPU: &vpa_types.GenericStartupBoost{
+							Type:   validCPUBoostTypeFactor,
+							Factor: &validCPUBoostFactor,
+						},
+					},
+				},
+			},
+			opts:        VPAValidationOptions{IsVPACreate: true, AllowCPUStartupBoost: true, AllowVpaSlice: true, AllowInPlace: true},
+			expectError: errors.New("spec.startupBoost.cpu: Forbidden: CPU startup boost cannot be used together with sliceByNodeLabel"),
+		},
+		{
+			name: "container CPU startupBoost with sliceByNodeLabel",
+			vpa: vpa_types.VerticalPodAutoscaler{
+				Spec: vpa_types.VerticalPodAutoscalerSpec{
+					TargetRef: &autoscalingv1.CrossVersionObjectReference{
+						Kind: "DaemonSet",
+						Name: "my-app",
+					},
+					UpdatePolicy: &vpa_types.PodUpdatePolicy{
+						UpdateMode: &inPlaceUpdateMode,
+					},
+					SliceByNodeLabel: ptr.To("topology.kubernetes.io/zone"),
+					ResourcePolicy: &vpa_types.PodResourcePolicy{
+						ContainerPolicies: []vpa_types.ContainerResourcePolicy{
+							{
+								ContainerName: "loot box",
+								StartupBoost: &vpa_types.StartupBoost{
+									CPU: &vpa_types.GenericStartupBoost{
+										Type:   validCPUBoostTypeFactor,
+										Factor: &validCPUBoostFactor,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			opts:        VPAValidationOptions{IsVPACreate: true, AllowCPUStartupBoost: true, AllowVpaSlice: true, AllowInPlace: true},
+			expectError: errors.New("spec.resourcePolicy.containerPolicies[0].startupBoost.cpu: Forbidden: CPU startup boost cannot be used together with sliceByNodeLabel"),
+		},
+		{
 			name: "per-vpa config active and used",
 			vpa: vpa_types.VerticalPodAutoscaler{
 				Spec: vpa_types.VerticalPodAutoscalerSpec{
