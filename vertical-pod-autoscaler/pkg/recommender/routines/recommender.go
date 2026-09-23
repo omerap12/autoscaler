@@ -65,6 +65,7 @@ type recommender struct {
 	checkpointsWriteTimeout       time.Duration
 	controllerFetcher             controllerfetcher.ControllerFetcher
 	lastCheckpointGC              time.Time
+	lastCheckpointSliceGC         time.Time
 	vpaClient                     vpa_api.VerticalPodAutoscalersGetter
 	vpaSliceClient                vpa_slice_api.VerticalPodAutoscalerSlicesGetter
 	podResourceRecommender        logic.PodResourceRecommender
@@ -267,6 +268,10 @@ func (r *recommender) MaintainCheckpoints(ctx context.Context) {
 func (r *recommender) MaintainCheckpointSlices(ctx context.Context) {
 	if r.useCheckpoints {
 		r.checkpointSliceWriter.StoreCheckpointSlices(ctx, r.updateWorkerCount)
+		if time.Since(r.lastCheckpointGC) > r.checkpointsGCInterval {
+			r.lastCheckpointSliceGC = time.Now()
+			r.clusterStateFeeder.GarbageCollectCheckpointsSlices(ctx)
+		}
 	}
 }
 
@@ -298,7 +303,11 @@ func (r *recommender) RunOnce() {
 	r.clusterStateFeeder.DeleteRemovedPods()
 	timer.ObserveStep("DeleteRemovedPods")
 
-	klog.V(3).InfoS("ClusterState is tracking", "pods", len(r.clusterState.Pods()), "vpas", len(r.clusterState.VPAs()))
+	if features.Enabled(features.VPASlices) {
+		klog.V(3).InfoS("ClusterState is tracking", "pods", len(r.clusterState.Pods()), "vpas", len(r.clusterState.VPAs()), "vpaslices", len(r.clusterState.VPASlices()))
+	} else {
+		klog.V(3).InfoS("ClusterState is tracking", "pods", len(r.clusterState.Pods()), "vpas", len(r.clusterState.VPAs()))
+	}
 
 	r.UpdateVPAs()
 	timer.ObserveStep("UpdateVPAs")
@@ -327,14 +336,14 @@ func (r *recommender) RunOnce() {
 type RecommenderFactory struct {
 	ClusterState model.ClusterState
 
-	ClusterStateFeeder      input.ClusterStateFeeder
-	ControllerFetcher       controllerfetcher.ControllerFetcher
-	CheckpointWriter        checkpoint.CheckpointWriter
-	CheckpointSliceWriter   checkpoint.CheckpointSliceWriter
-	PodResourceRecommender  logic.PodResourceRecommender
-	RecommendationFormat    logic.RecommendationFormat
-	VpaClient               vpa_api.VerticalPodAutoscalersGetter
-	VpaSliceClient          vpa_slice_api.VerticalPodAutoscalerSlicesGetter
+	ClusterStateFeeder     input.ClusterStateFeeder
+	ControllerFetcher      controllerfetcher.ControllerFetcher
+	CheckpointWriter       checkpoint.CheckpointWriter
+	CheckpointSliceWriter  checkpoint.CheckpointSliceWriter
+	PodResourceRecommender logic.PodResourceRecommender
+	RecommendationFormat   logic.RecommendationFormat
+	VpaClient              vpa_api.VerticalPodAutoscalersGetter
+	VpaSliceClient         vpa_slice_api.VerticalPodAutoscalerSlicesGetter
 
 	RecommendationPostProcessors []RecommendationPostProcessor
 
@@ -363,6 +372,7 @@ func (c RecommenderFactory) Make() Recommender {
 		recommendationPostProcessor:   c.RecommendationPostProcessors,
 		lastAggregateContainerStateGC: time.Now(),
 		lastCheckpointGC:              time.Now(),
+		lastCheckpointSliceGC:         time.Now(),
 		updateWorkerCount:             c.UpdateWorkerCount,
 	}
 	klog.V(3).InfoS("New Recommender created", "recommender", recommender)

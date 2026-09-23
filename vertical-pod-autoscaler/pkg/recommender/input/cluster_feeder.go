@@ -92,29 +92,32 @@ type ClusterStateFeeder interface {
 
 	// GarbageCollectCheckpoints removes historical checkpoints that don't have a matching VPA.
 	GarbageCollectCheckpoints(ctx context.Context)
+
+	// GarbageCollectCheckpointsSlices removes historical checkpoints slices that don't have a matching VPA slice.
+	GarbageCollectCheckpointsSlices(ctx context.Context)
 }
 
 // ClusterStateFeederFactory makes instances of ClusterStateFeeder.
 type ClusterStateFeederFactory struct {
-	ClusterState                model.ClusterState
-	MetricsClient               metrics.MetricsClient
-	VpaCheckpointClient         vpa_api.VerticalPodAutoscalerCheckpointsGetter
-	VpaCheckpointSlicesClient   vpaslices_api.VerticalPodAutoscalerSliceCheckpointsGetter
-	VpaSlicesClient             vpaslices_api.VerticalPodAutoscalerSlicesGetter
-	VpaCheckpointLister         vpa_lister.VerticalPodAutoscalerCheckpointLister
-	VpaCheckpointSlicesLister   vpaslices_lister.VerticalPodAutoscalerSliceCheckpointLister
-	VpaLister                   vpa_lister.VerticalPodAutoscalerLister
-	VpaSlicesLister             vpaslices_lister.VerticalPodAutoscalerSliceLister
-	NodeLister                  listersv1.NodeLister
-	PodLister                   listersv1.PodLister
-	OOMObserver                 oom.Observer
-	SelectorFetcher             target.VpaTargetSelectorFetcher
-	MemorySaveMode              bool
-	ControllerFetcher           controllerfetcher.ControllerFetcher
-	RecommenderName             string
-	IgnoredNamespaces           []string
-	VpaObjectNamespace          string
-	podsToDelete                []model.PodID
+	ClusterState              model.ClusterState
+	MetricsClient             metrics.MetricsClient
+	VpaCheckpointClient       vpa_api.VerticalPodAutoscalerCheckpointsGetter
+	VpaCheckpointSlicesClient vpaslices_api.VerticalPodAutoscalerSliceCheckpointsGetter
+	VpaSlicesClient           vpaslices_api.VerticalPodAutoscalerSlicesGetter
+	VpaCheckpointLister       vpa_lister.VerticalPodAutoscalerCheckpointLister
+	VpaCheckpointSlicesLister vpaslices_lister.VerticalPodAutoscalerSliceCheckpointLister
+	VpaLister                 vpa_lister.VerticalPodAutoscalerLister
+	VpaSlicesLister           vpaslices_lister.VerticalPodAutoscalerSliceLister
+	NodeLister                listersv1.NodeLister
+	PodLister                 listersv1.PodLister
+	OOMObserver               oom.Observer
+	SelectorFetcher           target.VpaTargetSelectorFetcher
+	MemorySaveMode            bool
+	ControllerFetcher         controllerfetcher.ControllerFetcher
+	RecommenderName           string
+	IgnoredNamespaces         []string
+	VpaObjectNamespace        string
+	podsToDelete              []model.PodID
 }
 
 // Make creates new ClusterStateFeeder with internal data providers, based on kube client.
@@ -428,6 +431,47 @@ func (feeder *clusterStateFeeder) GarbageCollectCheckpoints(ctx context.Context)
 			klog.V(3).InfoS("Orphaned VPA checkpoint cleanup - deleting", "checkpoint", klog.KObj(checkpoint))
 		}
 	}
+}
+
+func (feeder *clusterStateFeeder) GarbageCollectCheckpointsSlices(ctx context.Context) {
+	klog.V(3).InfoS("Starting garbage collection of checkpoint slices")
+
+	allVPASlicesKeys := map[model.VpaSliceID]bool{}
+
+	allVPASlicesResources, err := feeder.vpaSlicesLister.List(labels.Everything())
+	if err != nil {
+		klog.ErrorS(err, "Cannot list VPASlices")
+		return
+	}
+	for _, vpaSlice := range allVPASlicesResources {
+		vpaSliceID := model.VpaSliceID{
+			Namespace: vpaSlice.Namespace,
+			SliceName: vpaSlice.Name,
+		}
+		allVPASlicesKeys[vpaSliceID] = true
+	}
+
+	checkpointSlicesList, err := feeder.vpaCheckpointSlicesLister.List(labels.Everything())
+	if err != nil {
+		klog.ErrorS(err, "Cannot list CheckpointSlices")
+		return
+	}
+
+	for _, checkpointSlice := range checkpointSlicesList {
+		if feeder.shouldIgnoreNamespace(checkpointSlice.Namespace) {
+			klog.V(3).InfoS("Skipping checkpointSlice; it's namespace does not meet cleanup criteria", "checkpointSlice", klog.KObj(checkpointSlice), "vpaObjectNamespace", feeder.vpaObjectNamespace, "ignoredNamespaces", feeder.ignoredNamespaces)
+			continue
+		}
+		vpaSliceID := model.VpaSliceID{Namespace: checkpointSlice.Namespace, SliceName: checkpointSlice.Spec.VPASliceName}
+		if !allVPASlicesKeys[vpaSliceID] {
+			if err := feeder.vpaCheckpointSlicesClient.VerticalPodAutoscalerSliceCheckpoints(checkpointSlice.Namespace).Delete(ctx, checkpointSlice.Name, metav1.DeleteOptions{}); err != nil {
+				klog.ErrorS(err, "Orphaned VPA checkpointSlice cleanup - failed to delete", "checkpointSlice", klog.KObj(checkpointSlice))
+				continue
+			}
+			klog.V(3).InfoS("Orphaned VPA checkpointSlice cleanup - deleting", "checkpointSlice", klog.KObj(checkpointSlice))
+		}
+	}
+
 }
 
 func (feeder *clusterStateFeeder) shouldIgnoreNamespace(namespace string) bool {

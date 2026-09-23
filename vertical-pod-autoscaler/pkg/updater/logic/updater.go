@@ -544,7 +544,7 @@ func (u *updater) RunOnce(ctx context.Context) {
 		// TODO(omerap12): This is a hack — swapping the recommendation on a DeepCopy'd VPA so
 		// existing helpers work unchanged. Should be refactored to pass the recommendation explicitly.
 		vpa.Status.Recommendation = sliceWithSelector.Slice.Status.Recommendation
-		
+
 		// TODO(omerap12): This is a hack — VPA slices are node-scoped so each slice naturally has
 		// fewer pods than the full workload (e.g. a DaemonSet with 2 pods across 2 nodes yields
 		// 1 pod per slice). The restriction factory's replica count check would block updates for

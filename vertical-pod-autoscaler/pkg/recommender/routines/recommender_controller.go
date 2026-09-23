@@ -29,10 +29,10 @@ import (
 	resourceclient "k8s.io/metrics/pkg/client/clientset/versioned/typed/metrics/v1beta1"
 
 	vpa_clientset "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned"
+	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/features"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/checkpoint"
 	recommender_config "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/config"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input"
-	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/features"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/history"
 	input_metrics "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/metrics"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/logic"
@@ -145,9 +145,9 @@ func NewRecommenderController(
 	controllerFetcher.Start(ctx, scaleCacheLoopPeriod)
 
 	recommender := RecommenderFactory{
-		ClusterState:       clusterState,
-		ClusterStateFeeder: clusterStateFeeder,
-		ControllerFetcher:  controllerFetcher,
+		ClusterState:          clusterState,
+		ClusterStateFeeder:    clusterStateFeeder,
+		ControllerFetcher:     controllerFetcher,
 		CheckpointWriter:      checkpoint.NewCheckpointWriter(clusterState, vpaClient.AutoscalingV1()),
 		CheckpointSliceWriter: checkpoint.NewCheckpointSliceWriter(clusterState, vpaClient.AutoscalingV1alpha1()),
 		VpaClient:             vpaClient.AutoscalingV1(),
