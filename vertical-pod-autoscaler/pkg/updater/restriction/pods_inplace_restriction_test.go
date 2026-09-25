@@ -542,7 +542,7 @@ func TestCanInPlaceUpdate(t *testing.T) {
 				vpaForCreatorMaps = tc.vpaForCreatorMaps
 			}
 
-			creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(tc.pods, vpaForCreatorMaps)
+			creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(tc.pods, vpaForCreatorMaps, nil)
 			assert.NoError(t, err)
 			inPlace := factory.NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -586,7 +586,7 @@ func TestInPlaceTooFewReplicas(t *testing.T) {
 	basicVpa := getIPORVpa()
 	factory, err := getRestrictionFactory(&rc, nil, nil, nil, 10 /* minReplicas */, tolerance, clock, lipatm, GetFakeCalculatorsWithFakeResourceCalc(), false)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa, nil)
 	assert.NoError(t, err)
 	inplace := factory.NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -629,7 +629,7 @@ func TestEvictionToleranceForInPlace(t *testing.T) {
 	basicVpa := getIPORVpa()
 	factory, err := getRestrictionFactory(&rc, nil, nil, nil, 2 /* minReplicas */, tolerance, clock, lipatm, GetFakeCalculatorsWithFakeResourceCalc(), false)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa, nil)
 	assert.NoError(t, err)
 	inplace := factory.NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -677,7 +677,7 @@ func TestEvictionToleranceForInPlaceWithSkipDisruptionBudget(t *testing.T) {
 	factory, err := getRestrictionFactory(&rc, nil, nil, nil, 2 /* minReplicas */, tolerance, clock, lipatm, GetFakeCalculatorsWithFakeResourceCalc(), true /* inPlaceSkipDisruptionBudget */)
 	assert.NoError(t, err)
 
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa, nil)
 	assert.NoError(t, err)
 	inplace := factory.NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -728,7 +728,7 @@ func TestEvictionToleranceForInPlaceWithSkipDisruptionBudgetWithLessThanMinimumP
 	factory, err := getRestrictionFactory(&rc, nil, nil, nil, 2 /* minReplicas */, tolerance, clock, lipatm, GetFakeCalculatorsWithFakeResourceCalc(), true /* inPlaceSkipDisruptionBudget */)
 	assert.NoError(t, err)
 
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa, nil)
 	assert.NoError(t, err)
 
 	inplace := factory.NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
@@ -875,7 +875,7 @@ func TestInPlaceSkipDisruptionBudgetWithResizePolicy(t *testing.T) {
 			factory, err := getRestrictionFactory(&rc, nil, nil, nil, 2, tolerance, clock, lipatm, GetFakeCalculatorsWithFakeResourceCalc(), tc.inPlaceSkipDisruptionBudget)
 			assert.NoError(t, err)
 
-			creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa)
+			creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa, nil)
 			assert.NoError(t, err)
 
 			inplace := factory.NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
@@ -923,7 +923,7 @@ func TestInPlaceAtLeastOne(t *testing.T) {
 	inPlaceOrRecreateVPA := getIPORVpa()
 	factory, err := getRestrictionFactory(&rc, nil, nil, nil, 2, tolerance, nil, nil, GetFakeCalculatorsWithFakeResourceCalc(), false)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, inPlaceOrRecreateVPA)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, inPlaceOrRecreateVPA, nil)
 	assert.NoError(t, err)
 	inplace := factory.NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -965,7 +965,7 @@ func TestInPlaceUpdate_EventEmission(t *testing.T) {
 	inPlaceOrRecreateVPA := getIPORVpa()
 	factory, err := getRestrictionFactory(&rc, nil, nil, nil, 2, tolerance, nil, nil, GetFakeCalculatorsWithFakeResourceCalc(), false)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, inPlaceOrRecreateVPA)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, inPlaceOrRecreateVPA, nil)
 	assert.NoError(t, err)
 	inplace := factory.NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -1010,7 +1010,7 @@ func TestInPlaceModeDisabledFeatureGate(t *testing.T) {
 	inPlaceVpa := getIPVpa()
 	factory, err := getRestrictionFactory(&rc, nil, nil, nil, 2, tolerance, nil, nil, GetFakeCalculatorsWithFakeResourceCalc(), false)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, inPlaceVpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, inPlaceVpa, nil)
 	assert.NoError(t, err)
 	inplace := factory.NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -1048,7 +1048,7 @@ func TestInPlaceModeAtLeastOne(t *testing.T) {
 	inPlaceVpa := getIPVpa()
 	factory, err := getRestrictionFactory(&rc, nil, nil, nil, 2, tolerance, nil, nil, GetFakeCalculatorsWithFakeResourceCalc(), false)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, inPlaceVpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, inPlaceVpa, nil)
 	assert.NoError(t, err)
 	inplace := factory.NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -1239,7 +1239,7 @@ func TestInPlaceModeResizeStatuses(t *testing.T) {
 
 			factory, err := getRestrictionFactory(&rc, nil, nil, nil, 2, tolerance, clock, lipatm, GetFakeCalculatorsWithFakeResourceCalc(), false)
 			assert.NoError(t, err)
-			creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, vpa)
+			creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, vpa, nil)
 			assert.NoError(t, err)
 			inplace := factory.NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -1289,7 +1289,7 @@ func TestInPlaceModeAllowsRetryForInfeasible(t *testing.T) {
 	vpa := getIPVpa()
 	factory, err := getRestrictionFactory(&rc, nil, nil, nil, 2, tolerance, clock, lipatm, GetFakeCalculatorsWithFakeResourceCalc(), false)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, vpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, vpa, nil)
 	assert.NoError(t, err)
 	inplace := factory.NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 

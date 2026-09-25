@@ -70,6 +70,7 @@ function print_help {
   echo " - admission-controller"
   echo " - actuation"
   echo " - full-vpa"
+  echo " - vpaslice"
   echo ""
   echo "Environment variables:"
   echo "  REGISTRY           - Container image registry (default: localhost:5001)"
@@ -98,7 +99,7 @@ case ${SUITE} in
   recommender|updater|admission-controller)
     COMPONENTS="${SUITE}"
     ;;
-  full-vpa)
+  full-vpa|vpaslice)
     COMPONENTS="recommender updater admission-controller"
     ;;
   actuation)

@@ -384,7 +384,7 @@ func (u *updater) RunOnce(ctx context.Context) {
 		vpaSize := len(livePods)
 		updateMode := vpa_api_util.GetUpdateMode(vpa)
 		controlledPodsCounter.Add(vpaSize, updateMode, vpaSize)
-		creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := u.restrictionFactory.GetCreatorMaps(livePods, vpa)
+		creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := u.restrictionFactory.GetCreatorMaps(livePods, vpa, nil)
 		if err != nil {
 			klog.ErrorS(err, "Failed to get creator maps")
 			continue
@@ -545,21 +545,10 @@ func (u *updater) RunOnce(ctx context.Context) {
 		// existing helpers work unchanged. Should be refactored to pass the recommendation explicitly.
 		vpa.Status.Recommendation = sliceWithSelector.Slice.Status.Recommendation
 
-		// TODO(omerap12): This is a hack — VPA slices are node-scoped so each slice naturally has
-		// fewer pods than the full workload (e.g. a DaemonSet with 2 pods across 2 nodes yields
-		// 1 pod per slice). The restriction factory's replica count check would block updates for
-		// slices with fewer pods than minReplicas. Setting MinReplicas to 0 skips this check.
-		// Should be refactored so the restriction factory is slice-aware instead.
-		minReplicas := int32(0)
-		if vpa.Spec.UpdatePolicy == nil {
-			vpa.Spec.UpdatePolicy = &vpa_types.PodUpdatePolicy{}
-		}
-		vpa.Spec.UpdatePolicy.MinReplicas = &minReplicas
-
 		vpaSize := len(livePods)
 		updateMode := vpa_api_util.GetUpdateMode(vpa)
 		controlledPodsCounter.Add(vpaSize, updateMode, vpaSize)
-		creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := u.restrictionFactory.GetCreatorMaps(livePods, vpa)
+		creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := u.restrictionFactory.GetCreatorMaps(livePods, vpa, sliceWithSelector.Slice)
 		if err != nil {
 			klog.ErrorS(err, "Failed to get creator maps for VPA slice", "vpaSlice", klog.KObj(sliceWithSelector.Slice))
 			continue
@@ -821,7 +810,7 @@ func (u *updater) processNextBoostItem(ctx context.Context) bool {
 		livePods := filterDeletedPods(allPodsPerVPA)
 		vpaSize := len(livePods)
 
-		creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := u.restrictionFactory.GetCreatorMaps(livePods, vpa)
+		creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := u.restrictionFactory.GetCreatorMaps(livePods, vpa, nil)
 		if err != nil {
 			logger.Error(err, "Failed to get creator maps for unboosting")
 			u.cpuStartupBoostQueue.AddRateLimited(key)

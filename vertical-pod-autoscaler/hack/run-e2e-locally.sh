@@ -30,6 +30,7 @@ function print_help {
   echo " - admission-controller"
   echo " - actuation"
   echo " - full-vpa"
+  echo " - vpaslice"
   echo ""
   echo "Environment variables:"
   echo "  REGISTRY                 - Container image registry (default: localhost:5001)"
@@ -117,7 +118,7 @@ if [ "${ENABLE_ALL_FEATURE_GATES:-}" == "true" ] ; then
 fi
 
 case ${SUITE} in
-  recommender|recommender-externalmetrics|updater|admission-controller|actuation|full-vpa)
+  recommender|recommender-externalmetrics|updater|admission-controller|actuation|full-vpa|vpaslice)
     # Checking if user specified artifact directory to dump logs
     if [[ -z "${ARTIFACTS:-}" ]]; then
       # Create temp dir for artifacts

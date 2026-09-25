@@ -27,6 +27,7 @@ function print_help {
   echo " - admission-controller"
   echo " - actuation"
   echo " - full-vpa"
+  echo " - vpaslice"
 }
 
 
@@ -74,7 +75,7 @@ function dump_vpa_logs {
 }
 
 case ${SUITE} in
-  recommender|updater|admission-controller|actuation|full-vpa)
+  recommender|updater|admission-controller|actuation|full-vpa|vpaslice)
     export KUBECONFIG=$HOME/.kube/config
     pushd ${SCRIPT_ROOT}/test/e2e
     go install github.com/onsi/ginkgo/v2/ginkgo

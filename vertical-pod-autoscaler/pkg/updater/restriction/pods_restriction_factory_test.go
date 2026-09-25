@@ -521,7 +521,7 @@ func TestDisruptReplicatedByController(t *testing.T) {
 			}
 			factory, err := getRestrictionFactory(&rc, nil, nil, nil, 2, testCase.evictionTolerance, baseclocktest.NewFakeClock(time.Time{}), make(map[string]time.Time), GetFakeCalculatorsWithFakeResourceCalc(), false)
 			assert.NoError(t, err)
-			creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, testCase.vpa)
+			creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, testCase.vpa, nil)
 			assert.NoError(t, err)
 			eviction := factory.NewPodsEvictionRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 			inplace := factory.NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
@@ -577,7 +577,7 @@ func TestEvictReplicatedByReplicaSet(t *testing.T) {
 	basicVpa := getBasicVpa()
 	factory, err := getRestrictionFactory(nil, &rs, nil, nil, 2, 0.5, nil, nil, nil, false)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa, nil)
 	assert.NoError(t, err)
 	eviction := factory.NewPodsEvictionRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -620,7 +620,7 @@ func TestEvictReplicatedByStatefulSet(t *testing.T) {
 	basicVpa := getBasicVpa()
 	factory, err := getRestrictionFactory(nil, nil, &ss, nil, 2, 0.5, nil, nil, nil, false)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa, nil)
 	assert.NoError(t, err)
 	eviction := factory.NewPodsEvictionRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -662,7 +662,7 @@ func TestEvictReplicatedByDaemonSet(t *testing.T) {
 	basicVpa := getBasicVpa()
 	factory, err := getRestrictionFactory(nil, nil, nil, &ds, 2, 0.5, nil, nil, nil, false)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa, nil)
 	assert.NoError(t, err)
 	eviction := factory.NewPodsEvictionRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -701,7 +701,7 @@ func TestEvictReplicatedByJob(t *testing.T) {
 	basicVpa := getBasicVpa()
 	factory, err := getRestrictionFactory(nil, nil, nil, nil, 2, 0.5, nil, nil, nil, false)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa, nil)
 	assert.NoError(t, err)
 	eviction := factory.NewPodsEvictionRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 

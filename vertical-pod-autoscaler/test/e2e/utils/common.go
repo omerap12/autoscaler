@@ -37,6 +37,7 @@ import (
 	framework_deployment "k8s.io/kubernetes/test/e2e/framework/deployment"
 
 	vpa_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
+	vpaslice_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1alpha1"
 	vpa_clientset "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned"
 )
 
@@ -336,4 +337,96 @@ func WaitForVPAMatch(c vpa_clientset.Interface, vpa *vpa_types.VerticalPodAutosc
 		return nil, fmt.Errorf("error waiting for recommendation present in %v: %v", vpa.Name, err)
 	}
 	return polledVpa, nil
+}
+
+// listVPASlicesForVPA lists all VPASlice objects that belong to the given VPA by matching Spec.VPAName.
+func listVPASlicesForVPA(ctx context.Context, c vpa_clientset.Interface, namespace, vpaName string) ([]*vpaslice_types.VerticalPodAutoscalerSlice, error) {
+	sliceList, err := c.AutoscalingV1alpha1().VerticalPodAutoscalerSlices(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	var matched []*vpaslice_types.VerticalPodAutoscalerSlice
+	for i := range sliceList.Items {
+		if sliceList.Items[i].Spec.VPAName == vpaName {
+			matched = append(matched, &sliceList.Items[i])
+		}
+	}
+	return matched, nil
+}
+
+// WaitForVPASlicesPresent polls until VPASlice objects exist for the given VPA with the expected count.
+func WaitForVPASlicesPresent(c vpa_clientset.Interface, vpa *vpa_types.VerticalPodAutoscaler, expectedCount int) ([]*vpaslice_types.VerticalPodAutoscalerSlice, error) {
+	var slices []*vpaslice_types.VerticalPodAutoscalerSlice
+	err := wait.PollUntilContextTimeout(context.Background(), PollInterval, PollTimeout, true, func(ctx context.Context) (done bool, err error) {
+		slices, err = listVPASlicesForVPA(ctx, c, vpa.Namespace, vpa.Name)
+		if err != nil {
+			return false, err
+		}
+		return len(slices) >= expectedCount, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error waiting for %d VPASlices for VPA %s: %v", expectedCount, vpa.Name, err)
+	}
+	return slices, nil
+}
+
+// WaitForVPASlicesWithRecommendations polls until all VPASlice objects for the VPA have non-empty recommendations.
+func WaitForVPASlicesWithRecommendations(c vpa_clientset.Interface, vpa *vpa_types.VerticalPodAutoscaler, expectedCount int) ([]*vpaslice_types.VerticalPodAutoscalerSlice, error) {
+	var slices []*vpaslice_types.VerticalPodAutoscalerSlice
+	err := wait.PollUntilContextTimeout(context.Background(), PollInterval, PollTimeout, true, func(ctx context.Context) (done bool, err error) {
+		slices, err = listVPASlicesForVPA(ctx, c, vpa.Namespace, vpa.Name)
+		if err != nil {
+			return false, err
+		}
+		if len(slices) < expectedCount {
+			return false, nil
+		}
+		for _, s := range slices {
+			if s.Status.Recommendation == nil || len(s.Status.Recommendation.ContainerRecommendations) == 0 {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error waiting for VPASlice recommendations for VPA %s: %v", vpa.Name, err)
+	}
+	return slices, nil
+}
+
+// WaitForVPASlicesGone polls until no VPASlice objects exist for the given VPA name.
+func WaitForVPASlicesGone(c vpa_clientset.Interface, namespace, vpaName string) error {
+	return wait.PollUntilContextTimeout(context.Background(), PollInterval, PollTimeout, true, func(ctx context.Context) (done bool, err error) {
+		slices, err := listVPASlicesForVPA(ctx, c, namespace, vpaName)
+		if err != nil {
+			return false, err
+		}
+		return len(slices) == 0, nil
+	})
+}
+
+// InstallVPASlice creates a VPASlice object with a pre-set recommendation.
+func InstallVPASlice(f *framework.Framework, slice *vpaslice_types.VerticalPodAutoscalerSlice) {
+	vpaClientSet := GetVpaClientSet(f)
+	created, err := vpaClientSet.AutoscalingV1alpha1().VerticalPodAutoscalerSlices(f.Namespace.Name).Create(context.TODO(), slice, metav1.CreateOptions{})
+	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "unexpected error creating VPASlice")
+
+	if slice.Status.Recommendation != nil {
+		PatchVPASliceRecommendation(f, created, slice.Status.Recommendation)
+	}
+}
+
+// PatchVPASliceRecommendation patches a VPASlice's status with a recommendation.
+func PatchVPASliceRecommendation(f *framework.Framework, slice *vpaslice_types.VerticalPodAutoscalerSlice, recommendation *vpa_types.RecommendedPodResources) {
+	newStatus := slice.Status.DeepCopy()
+	newStatus.Recommendation = recommendation
+	bytes, err := json.Marshal([]PatchRecord{{
+		Op:    "replace",
+		Path:  "/status",
+		Value: *newStatus,
+	}})
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	_, err = GetVpaClientSet(f).AutoscalingV1alpha1().VerticalPodAutoscalerSlices(f.Namespace.Name).Patch(
+		context.TODO(), slice.Name, types.JSONPatchType, bytes, metav1.PatchOptions{}, "status")
+	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "Failed to patch VPASlice.")
 }

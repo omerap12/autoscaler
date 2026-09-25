@@ -53,6 +53,7 @@ type VerticalPodAutoscalerBuilder interface {
 	WithOOMMinBumpUp(minBumpUp *resource.Quantity) VerticalPodAutoscalerBuilder
 	WithCPUStartupBoost(boostType vpa_types.StartupBoostType, factor *int32, quantity *resource.Quantity, durationSeconds int32) VerticalPodAutoscalerBuilder
 	WithContainerCPUStartupBoost(containerName string, boostType vpa_types.StartupBoostType, factor *int32, quantity *resource.Quantity, durationSeconds int32) VerticalPodAutoscalerBuilder
+	WithSliceByNodeLabel(label string) VerticalPodAutoscalerBuilder
 	AppendCondition(conditionType vpa_types.VerticalPodAutoscalerConditionType,
 		status corev1.ConditionStatus, reason, message string, lastTransitionTime time.Time) VerticalPodAutoscalerBuilder
 	AppendRecommendation(vpa_types.RecommendedContainerResources) VerticalPodAutoscalerBuilder
@@ -98,6 +99,7 @@ type verticalPodAutoscalerBuilder struct {
 	recommender             string
 	oomBumpUpRatio          *resource.Quantity
 	oomMinBumpUp            *resource.Quantity
+	sliceByNodeLabel        *string
 }
 
 func (b *verticalPodAutoscalerBuilder) WithName(vpaName string) VerticalPodAutoscalerBuilder {
@@ -246,6 +248,12 @@ func (b *verticalPodAutoscalerBuilder) WithOOMMinBumpUp(minBumpUp *resource.Quan
 	return &c
 }
 
+func (b *verticalPodAutoscalerBuilder) WithSliceByNodeLabel(label string) VerticalPodAutoscalerBuilder {
+	c := *b
+	c.sliceByNodeLabel = &label
+	return &c
+}
+
 func (b *verticalPodAutoscalerBuilder) AppendCondition(conditionType vpa_types.VerticalPodAutoscalerConditionType,
 	status corev1.ConditionStatus, reason, message string, lastTransitionTime time.Time) VerticalPodAutoscalerBuilder {
 	c := *b
@@ -347,11 +355,12 @@ func (b *verticalPodAutoscalerBuilder) Get() *vpa_types.VerticalPodAutoscaler {
 			CreationTimestamp: metav1.NewTime(b.creationTimestamp),
 		},
 		Spec: vpa_types.VerticalPodAutoscalerSpec{
-			UpdatePolicy:   b.updatePolicy,
-			ResourcePolicy: &resourcePolicy,
-			TargetRef:      b.targetRef,
-			Recommenders:   recommenders,
-			StartupBoost:   b.startupBoost,
+			UpdatePolicy:     b.updatePolicy,
+			ResourcePolicy:   &resourcePolicy,
+			TargetRef:        b.targetRef,
+			Recommenders:     recommenders,
+			StartupBoost:     b.startupBoost,
+			SliceByNodeLabel: b.sliceByNodeLabel,
 		},
 		Status: vpa_types.VerticalPodAutoscalerStatus{
 			Recommendation: recommendation,

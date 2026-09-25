@@ -32,6 +32,7 @@ import (
 
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/admission-controller/resource/pod/patch"
 	vpa_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
+	vpaslices_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1alpha1"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/updater/utils"
 	vpa_api_util "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/vpa"
 )
@@ -55,7 +56,7 @@ type podReplicaCreator struct {
 
 // PodsRestrictionFactory is a factory for creating PodsEvictionRestriction and PodsInPlaceRestriction.
 type PodsRestrictionFactory interface {
-	GetCreatorMaps(pods []*corev1.Pod, vpa *vpa_types.VerticalPodAutoscaler) (map[podReplicaCreator]singleGroupStats, map[string]podReplicaCreator, error)
+	GetCreatorMaps(pods []*corev1.Pod, vpa *vpa_types.VerticalPodAutoscaler, vpaSlice *vpaslices_types.VerticalPodAutoscalerSlice) (map[podReplicaCreator]singleGroupStats, map[string]podReplicaCreator, error)
 	NewPodsEvictionRestriction(creatorToSingleGroupStatsMap map[podReplicaCreator]singleGroupStats, podToReplicaCreatorMap map[string]podReplicaCreator) PodsEvictionRestriction
 	NewPodsInPlaceRestriction(creatorToSingleGroupStatsMap map[podReplicaCreator]singleGroupStats, podToReplicaCreatorMap map[string]podReplicaCreator) PodsInPlaceRestriction
 }
@@ -158,7 +159,7 @@ func (f *PodsRestrictionFactoryImpl) getReplicaCount(creator podReplicaCreator) 
 
 // GetCreatorMaps is a helper function that returns a map of pod replica creators to their single group stats
 // and a map of pod ids to pod replica creator from a list of pods and it's corresponding VPA.
-func (f *PodsRestrictionFactoryImpl) GetCreatorMaps(pods []*corev1.Pod, vpa *vpa_types.VerticalPodAutoscaler) (map[podReplicaCreator]singleGroupStats, map[string]podReplicaCreator, error) {
+func (f *PodsRestrictionFactoryImpl) GetCreatorMaps(pods []*corev1.Pod, vpa *vpa_types.VerticalPodAutoscaler, vpaSlice *vpaslices_types.VerticalPodAutoscalerSlice) (map[podReplicaCreator]singleGroupStats, map[string]podReplicaCreator, error) {
 	livePods := make(map[podReplicaCreator][]*corev1.Pod)
 
 	for _, pod := range pods {
@@ -176,6 +177,30 @@ func (f *PodsRestrictionFactoryImpl) GetCreatorMaps(pods []*corev1.Pod, vpa *vpa
 
 	podToReplicaCreatorMap := make(map[string]podReplicaCreator)
 	creatorToSingleGroupStatsMap := make(map[podReplicaCreator]singleGroupStats)
+
+	// VPA slices are node-scoped so each slice naturally has fewer pods than the
+	// full workload. Skip the minReplicas check for slices since the VPA-level
+	// minReplicas is defined for the total workload, not per-slice.
+	// TODO(omerap12): Do we want to have a different approach? if not we need to add a validation on the API object.
+	if vpaSlice != nil {
+		for creator, replicas := range livePods {
+			singleGroup := singleGroupStats{}
+			singleGroup.configured = len(replicas)
+			singleGroup.evictionTolerance = int(float64(len(replicas)) * f.evictionToleranceFraction) // truncated
+			for _, pod := range replicas {
+				podToReplicaCreatorMap[getPodID(pod)] = creator
+				if pod.Status.Phase == corev1.PodPending {
+					singleGroup.pending = singleGroup.pending + 1
+				}
+				if isInPlaceUpdating(pod) {
+					singleGroup.inPlaceUpdateOngoing = singleGroup.inPlaceUpdateOngoing + 1
+				}
+			}
+			singleGroup.running = len(replicas) - singleGroup.pending
+			creatorToSingleGroupStatsMap[creator] = singleGroup
+		}
+		return creatorToSingleGroupStatsMap, podToReplicaCreatorMap, nil
+	}
 
 	// Use per-VPA minReplicas if present, fall back to the global setting.
 	required := f.minReplicas

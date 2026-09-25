@@ -56,7 +56,7 @@ func TestEvictTooFewReplicas(t *testing.T) {
 	basicVpa := getBasicVpa()
 	factory, err := getRestrictionFactory(&rc, nil, nil, nil, 10, 0.5, nil, nil, nil, false)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa, nil)
 	assert.NoError(t, err)
 	eviction := factory.NewPodsEvictionRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -96,7 +96,7 @@ func TestEvictionTolerance(t *testing.T) {
 	basicVpa := getBasicVpa()
 	factory, err := getRestrictionFactory(&rc, nil, nil, nil, 2 /* minReplicas */, tolerance, nil, nil, nil, false)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa, nil)
 	assert.NoError(t, err)
 	eviction := factory.NewPodsEvictionRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -140,7 +140,7 @@ func TestEvictAtLeastOne(t *testing.T) {
 	basicVpa := getBasicVpa()
 	factory, err := getRestrictionFactory(&rc, nil, nil, nil, 2, tolerance, nil, nil, nil, false)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa, nil)
 	assert.NoError(t, err)
 	eviction := factory.NewPodsEvictionRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -232,7 +232,7 @@ func TestEvictEmitEvent(t *testing.T) {
 		clock := baseclocktest.NewFakeClock(time.Time{})
 		factory, err := getRestrictionFactory(&rc, nil, nil, nil, 2, testCase.evictionTolerance, clock, map[string]time.Time{}, nil, false)
 		assert.NoError(t, err)
-		creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, testCase.vpa)
+		creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, testCase.vpa, nil)
 		assert.NoError(t, err)
 		eviction := factory.NewPodsEvictionRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 
@@ -285,7 +285,7 @@ func TestEvictTooFewReplicasWithInPlaceSkipDisruptionBudget(t *testing.T) {
 	// factory with inPlaceSkipDisruptionBudget on
 	factory, err := getRestrictionFactory(&rc, nil, nil, nil, 10, 0.5, nil, nil, nil, true)
 	assert.NoError(t, err)
-	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa)
+	creatorToSingleGroupStatsMap, podToReplicaCreatorMap, err := factory.GetCreatorMaps(pods, basicVpa, nil)
 	assert.NoError(t, err)
 	eviction := factory.NewPodsEvictionRestriction(creatorToSingleGroupStatsMap, podToReplicaCreatorMap)
 

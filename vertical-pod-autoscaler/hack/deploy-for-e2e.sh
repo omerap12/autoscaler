@@ -29,6 +29,7 @@ function print_help {
   echo " - admission-controller"
   echo " - actuation"
   echo " - full-vpa"
+  echo " - vpaslice"
   echo "If component is not specified all above will be started."
 }
 
@@ -43,7 +44,7 @@ case ${SUITE} in
   recommender|updater|admission-controller)
     COMPONENTS="${SUITE}"
     ;;
-  full-vpa)
+  full-vpa|vpaslice)
     COMPONENTS="recommender updater admission-controller"
     ;;
   actuation)

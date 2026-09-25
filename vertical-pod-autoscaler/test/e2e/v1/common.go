@@ -26,6 +26,7 @@ import (
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscaling "k8s.io/api/autoscaling/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -47,6 +48,7 @@ const (
 	admissionControllerComponent = "admission-controller"
 	fullVpaSuite                 = "full-vpa"
 	actuationSuite               = "actuation"
+	vpaSliceSuite                = "vpaslice"
 	cronJobsWaitTimeout          = 15 * time.Minute
 	// VpaEvictionTimeout is a timeout for VPA to restart a pod if there are no
 	// mechanisms blocking it (for example PDB).
@@ -74,6 +76,11 @@ func FullVpaE2eDescribe(name string, args ...any) bool {
 // ActuationSuiteE2eDescribe describes a VPA actuation e2e test.
 func ActuationSuiteE2eDescribe(name string, args ...any) bool {
 	return utils.SIGDescribe(actuationSuite, name, args...)
+}
+
+// VPASliceE2eDescribe describes a VPA slice e2e test.
+func VPASliceE2eDescribe(name string, args ...any) bool {
+	return utils.SIGDescribe(vpaSliceSuite, name, args...)
 }
 
 // SetupHamsterDeployment creates and installs a simple hamster deployment
@@ -536,4 +543,70 @@ func WaitForPodsUpdatedWithoutEviction(f *framework.Framework, initialPods *apiv
 	})
 	framework.Logf("finished waiting for at least one pod to be updated without eviction")
 	return err
+}
+
+// HamsterDaemonSetTargetRef returns a CrossVersionObjectReference for a DaemonSet named "hamster-daemonset".
+var HamsterDaemonSetTargetRef = &autoscaling.CrossVersionObjectReference{
+	APIVersion: "apps/v1",
+	Kind:       "DaemonSet",
+	Name:       "hamster-daemonset",
+}
+
+// NewHamsterDaemonSet creates a simple hamster DaemonSet for e2e test purposes.
+func NewHamsterDaemonSet(f *framework.Framework, cpu, memory string) *appsv1.DaemonSet {
+	cpuQuantity := ParseQuantityOrDie(cpu)
+	memoryQuantity := ParseQuantityOrDie(memory)
+	return &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "hamster-daemonset",
+			Namespace: f.Namespace.Name,
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: utils.HamsterLabels,
+			},
+			Template: apiv1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: utils.HamsterLabels,
+				},
+				Spec: apiv1.PodSpec{
+					Containers: []apiv1.Container{
+						{
+							Name:    "hamster",
+							Image:   "registry.k8s.io/e2e-test-images/busybox:1.37.0-2",
+							Command: []string{"/bin/sh"},
+							Args:    []string{"-c", "while true; do sleep 10 ; done"},
+							Resources: apiv1.ResourceRequirements{
+								Requests: apiv1.ResourceList{
+									apiv1.ResourceCPU:    cpuQuantity,
+									apiv1.ResourceMemory: memoryQuantity,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// SetupHamsterDaemonSet creates a hamster DaemonSet and waits for its pods to be running.
+func SetupHamsterDaemonSet(f *framework.Framework, cpu, memory string) *appsv1.DaemonSet {
+	ds := NewHamsterDaemonSet(f, cpu, memory)
+	ds, err := f.ClientSet.AppsV1().DaemonSets(f.Namespace.Name).Create(context.TODO(), ds, metav1.CreateOptions{})
+	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "unexpected error when creating DaemonSet")
+
+	err = waitForDaemonSetPodsRunning(f, ds)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "unexpected error waiting for DaemonSet pods to be running")
+	return ds
+}
+
+func waitForDaemonSetPodsRunning(f *framework.Framework, ds *appsv1.DaemonSet) error {
+	return wait.PollUntilContextTimeout(context.Background(), utils.PollInterval, utils.PollTimeout, true, func(ctx context.Context) (done bool, err error) {
+		updatedDS, err := f.ClientSet.AppsV1().DaemonSets(f.Namespace.Name).Get(ctx, ds.Name, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		return updatedDS.Status.NumberReady > 0 && updatedDS.Status.NumberReady == updatedDS.Status.DesiredNumberScheduled, nil
+	})
 }
