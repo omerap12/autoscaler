@@ -175,7 +175,7 @@ var _ = VPASliceE2eDescribe("VPASlice", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "VPASliceCheckpoint objects should be created for each VPASlice")
 		})
 
-	f.It("updater evicts DaemonSet pods with outdated resources when mode is Recreate",
+	f.It("updater evicts DaemonSet pods and applies VPASlice recommendations when mode is Recreate",
 		framework.WithFeatureGate(features.VPASlices), func() {
 			ginkgo.By("Setting up a hamster DaemonSet with low resources")
 			SetupHamsterDaemonSet(f, "10m", "10Mi")
@@ -199,13 +199,50 @@ var _ = VPASliceE2eDescribe("VPASlice", func() {
 
 			ginkgo.By("Waiting for VPASlice recommendations")
 			vpaClientSet := utils.GetVpaClientSet(f)
-			_, err = utils.WaitForVPASlicesWithRecommendations(vpaClientSet, vpaCRD, expectedWorkerNodes)
+			slices, err := utils.WaitForVPASlicesWithRecommendations(vpaClientSet, vpaCRD, expectedWorkerNodes)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			ginkgo.By("Waiting for at least one pod to be evicted by the updater")
 			err = waitForDaemonSetPodsEvicted(f, initialPodSet)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "at least one DaemonSet pod should be evicted by the updater")
 
+			currentPodList, err := GetHamsterPods(f)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			currentPodSet := MakePodSet(currentPodList)
+
+			newPods := GetNewlyCreatedPods(initialPodSet, currentPodSet)
+			gomega.Expect(newPods).NotTo(gomega.BeEmpty())
+
+			ginkgo.By("Verifying new pods have resources matching their VPASlice recommendation")
+			sliceByNode := make(map[string]*vpa_types.RecommendedPodResources)
+			for _, slice := range slices {
+				nodeName := slice.Spec.NodeSelector[sliceByNodeLabel]
+				sliceByNode[nodeName] = slice.Status.Recommendation
+			}
+
+			for _, podName := range newPods {
+				pod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Get(context.TODO(), podName, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				recommendation, found := sliceByNode[pod.Spec.NodeName]
+				gomega.Expect(found).To(gomega.BeTrue(), "VPASlice recommendation not found for node %s", pod.Spec.NodeName)
+
+				for _, containerRec := range recommendation.ContainerRecommendations {
+					for i, container := range pod.Spec.Containers {
+						if container.Name != containerRec.ContainerName {
+							continue
+						}
+						framework.Logf("Pod %s container %s: requests=%v, VPASlice target=%v",
+							podName, container.Name, container.Resources.Requests, containerRec.Target)
+						gomega.Expect(pod.Spec.Containers[i].Resources.Requests[apiv1.ResourceCPU]).To(
+							gomega.Equal(containerRec.Target[apiv1.ResourceCPU]),
+							"CPU request for pod %s should match VPASlice recommendation", podName)
+						gomega.Expect(pod.Spec.Containers[i].Resources.Requests[apiv1.ResourceMemory]).To(
+							gomega.Equal(containerRec.Target[apiv1.ResourceMemory]),
+							"memory request for pod %s should match VPASlice recommendation", podName)
+					}
+				}
+			}
 		})
 
 	f.It("does not apply VPASlice recommendation when update mode is Off",
@@ -260,7 +297,21 @@ func waitForDaemonSetPodsEvicted(f *framework.Framework, initialPodSet PodSet) e
 		}
 		currentPodSet := MakePodSet(currentPodList)
 		evicted := GetEvictedPodsCount(currentPodSet, initialPodSet)
-		framework.Logf("%d of %d initial DaemonSet pods have been evicted", evicted, len(initialPodSet))
 		return evicted > 0, nil
 	})
+}
+
+func GetNewlyCreatedPods(oldPodSet PodSet, newPodSet PodSet) []string {
+	newPods := make([]string, 0)
+	for podName, uid := range newPodSet {
+		oldUID, exists := oldPodSet[podName]
+		if !exists {
+			newPods = append(newPods, podName)
+			continue
+		}
+		if oldUID != uid {
+			newPods = append(newPods, podName)
+		}
+	}
+	return newPods
 }
